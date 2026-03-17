@@ -54,6 +54,8 @@ const AUDIO_CACHE_DISK_LIMIT = 120
 const ENABLE_PREWARM = false
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const STREAMED_PIPER_FIRST_BATCH_WORDS = 1
+const XTTS_FIRST_BATCH_WORDS = 6
+const XTTS_LOW_END_FIRST_BATCH_WORDS = 4
 const STREAM_INITIAL_PCM_BYTES = 4096
 const STREAM_STEADY_PCM_BYTES = 16384
 const STREAM_CHUNK_FADE_SEC = 0.008
@@ -162,7 +164,13 @@ const createPcmAudioBuffer = (ctx: AudioContext, pcmBytes: Uint8Array, sampleRat
 
 const getBatchRampForEngine = (engine: string, lowEndMode: boolean) => {
   const baseRamp = lowEndMode ? LOW_END_BATCH_RAMP : DEFAULT_BATCH_RAMP
-  return engine === 'piper' ? [STREAMED_PIPER_FIRST_BATCH_WORDS, ...baseRamp] : baseRamp
+  if (engine === 'piper') {
+    return [STREAMED_PIPER_FIRST_BATCH_WORDS, ...baseRamp]
+  }
+  if (engine === 'xtts') {
+    return [(lowEndMode ? XTTS_LOW_END_FIRST_BATCH_WORDS : XTTS_FIRST_BATCH_WORDS), ...baseRamp]
+  }
+  return baseRamp
 }
 
 export function useAudioPlayer({

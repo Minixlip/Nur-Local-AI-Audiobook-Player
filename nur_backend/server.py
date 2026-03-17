@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import io
+import hashlib
 import os
 import sys
 import threading
@@ -71,6 +72,10 @@ xtts_status = {
     "state": "missing",
     "message": "XTTS is available as an optional download.",
 }
+XTTS_SAMPLE_RATE = 24000
+XTTS_LATENT_CACHE_VERSION = "xtts_v2"
+XTTS_SILENCE_THRESHOLD = 350
+XTTS_SILENCE_PAD_MS = 40
 
 piper_voice = None
 loaded_piper_path = None
@@ -111,6 +116,80 @@ def trim_silence_int16(samples, sample_rate, threshold=500, pad_ms=30):
     return samples[start:end]
 
 
+def get_user_cache_dir() -> str:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "Nur", "cache")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Caches"), "Nur")
+    return os.path.join(
+        os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "nur"
+    )
+
+
+def get_xtts_latent_cache_dir() -> str:
+    cache_dir = os.path.join(get_user_cache_dir(), "xtts_latents")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def build_xtts_latent_cache_path(speaker_path: str) -> str:
+    stats = os.stat(speaker_path)
+    payload = (
+        f"{XTTS_LATENT_CACHE_VERSION}|"
+        f"{os.path.abspath(speaker_path)}|"
+        f"{stats.st_mtime_ns}|"
+        f"{stats.st_size}"
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return os.path.join(get_xtts_latent_cache_dir(), f"{digest}.pt")
+
+
+def move_latents_to_cpu(latents):
+    if torch.is_tensor(latents):
+        return latents.detach().cpu()
+    if isinstance(latents, tuple):
+        return tuple(move_latents_to_cpu(item) for item in latents)
+    if isinstance(latents, list):
+        return [move_latents_to_cpu(item) for item in latents]
+    return latents
+
+
+def move_latents_to_device(latents):
+    if torch.is_tensor(latents):
+        return latents.to(device)
+    if isinstance(latents, tuple):
+        return tuple(move_latents_to_device(item) for item in latents)
+    if isinstance(latents, list):
+        return [move_latents_to_device(item) for item in latents]
+    return latents
+
+
+def load_cached_speaker_embedding(speaker_path: str):
+    cache_path = build_xtts_latent_cache_path(speaker_path)
+    if not os.path.exists(cache_path):
+        return None
+
+    try:
+        cached = torch.load(cache_path, map_location="cpu")
+        return move_latents_to_device(cached)
+    except Exception as error:
+        print(f"Speaker embed disk cache load failed: {error}")
+        try:
+            os.remove(cache_path)
+        except OSError:
+            pass
+        return None
+
+
+def save_cached_speaker_embedding(speaker_path: str, latents) -> None:
+    cache_path = build_xtts_latent_cache_path(speaker_path)
+    try:
+        torch.save(move_latents_to_cpu(latents), cache_path)
+    except Exception as error:
+        print(f"Speaker embed disk cache save failed: {error}")
+
+
 def warmup_xtts(model):
     print("Warming up XTTS...")
     warmup_speaker = resolve_resource_path("default_speaker.wav")
@@ -122,6 +201,27 @@ def warmup_xtts(model):
         model.tts("Ready.", language="en", speaker_wav=warmup_speaker, speed=1.2)
     if device == "cuda":
         torch.cuda.synchronize()
+
+
+def encode_wav_bytes(samples, sample_rate: int) -> bytes:
+    out_buf = io.BytesIO()
+    scipy.io.wavfile.write(out_buf, sample_rate, samples)
+    audio_data = out_buf.getvalue()
+    out_buf.close()
+    return audio_data
+
+
+def finalize_xtts_audio(wav_out) -> bytes:
+    wav_np = np.asarray(wav_out, dtype=np.float32)
+    wav_np = np.clip(wav_np, -1, 1)
+    wav_int16 = (wav_np * 32767).astype(np.int16)
+    wav_int16 = trim_silence_int16(
+        wav_int16,
+        XTTS_SAMPLE_RATE,
+        threshold=XTTS_SILENCE_THRESHOLD,
+        pad_ms=XTTS_SILENCE_PAD_MS,
+    )
+    return encode_wav_bytes(wav_int16, XTTS_SAMPLE_RATE)
 
 
 def prepare_xtts_model():
@@ -137,6 +237,12 @@ def prepare_xtts_model():
                 print(f"XTTS warmup skipped: {error}")
         xtts_model = model
         get_speaker_embedding.cache_clear()
+        default_speaker = resolve_resource_path("default_speaker.wav")
+        if os.path.exists(default_speaker):
+            try:
+                get_speaker_embedding(default_speaker)
+            except Exception as error:
+                print(f"XTTS speaker cache warmup skipped: {error}")
         print("XTTS Ready")
         set_xtts_status("ready", f"XTTS is ready on {device.upper()}.")
     except Exception as error:
@@ -165,8 +271,13 @@ def get_speaker_embedding(speaker_wav: str):
         return None
     try:
         speaker_path = resolve_resource_path(speaker_wav)
+        cached_latents = load_cached_speaker_embedding(speaker_path)
+        if cached_latents is not None:
+            return cached_latents
         if hasattr(xtts_model, "get_conditioning_latents"):
             latents = xtts_model.get_conditioning_latents(speaker_wav=speaker_path)
+            if latents is not None:
+                save_cached_speaker_embedding(speaker_path, latents)
             if isinstance(latents, (list, tuple)) and len(latents) >= 2:
                 return latents[0], latents[1]
             return latents
@@ -354,11 +465,7 @@ def generate_speech(request: SpeakRequest):
                 raw_audio = collect_piper_audio_bytes(request.text, request.session_id)
                 audio_np = np.frombuffer(raw_audio, dtype=np.int16)
                 audio_np = trim_silence_int16(audio_np, voice.config.sample_rate)
-
-                out_buf = io.BytesIO()
-                scipy.io.wavfile.write(out_buf, voice.config.sample_rate, audio_np)
-                audio_data = out_buf.getvalue()
-                out_buf.close()
+                audio_data = encode_wav_bytes(audio_np, voice.config.sample_rate)
             except Exception as error:
                 print(f"Piper internal error: {error}")
                 import traceback
@@ -370,6 +477,12 @@ def generate_speech(request: SpeakRequest):
             current_status = get_xtts_status()
             if current_status["state"] != "ready" or xtts_model is None:
                 raise HTTPException(status_code=409, detail="XTTS is not ready yet")
+
+            speaker_path = resolve_resource_path(request.speaker_wav)
+            if not os.path.exists(speaker_path):
+                raise HTTPException(status_code=500, detail=f"Missing speaker wav: {speaker_path}")
+
+            speaker_latents = load_cached_speaker_embedding(speaker_path)
 
             with gpu_lock:
                 if request.session_id != state.active_session_id:
@@ -385,12 +498,10 @@ def generate_speech(request: SpeakRequest):
                     "speed": request.speed,
                 }
 
-                speaker_path = resolve_resource_path(request.speaker_wav)
-                if not os.path.exists(speaker_path):
-                    raise HTTPException(status_code=500, detail=f"Missing speaker wav: {speaker_path}")
+                if speaker_latents is None:
+                    speaker_latents = get_speaker_embedding(speaker_path)
 
-                speaker_latents = get_speaker_embedding(speaker_path)
-                if speaker_latents:
+                if speaker_latents is not None:
                     if isinstance(speaker_latents, tuple) and len(speaker_latents) == 2:
                         tts_kwargs["gpt_cond_latent"] = speaker_latents[0]
                         tts_kwargs["speaker_embedding"] = speaker_latents[1]
@@ -403,15 +514,7 @@ def generate_speech(request: SpeakRequest):
                     wav_out = current_xtts.tts(**tts_kwargs)
                 if device == "cuda":
                     torch.cuda.synchronize()
-
-                wav_np = np.array(wav_out)
-                wav_np = np.clip(wav_np, -1, 1)
-                wav_int16 = (wav_np * 32767).astype(np.int16)
-
-                out_buf = io.BytesIO()
-                scipy.io.wavfile.write(out_buf, 24000, wav_int16)
-                audio_data = out_buf.getvalue()
-                out_buf.close()
+                audio_data = finalize_xtts_audio(wav_out)
 
         else:
             raise HTTPException(status_code=400, detail="Unknown engine")
