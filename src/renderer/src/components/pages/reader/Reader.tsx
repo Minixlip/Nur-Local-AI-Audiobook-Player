@@ -41,12 +41,14 @@ export default function Reader(): React.JSX.Element {
   const lastLoadedIdRef = useRef<string | null>(null)
   const initializedPageRef = useRef(false)
   const lastProgressPageRef = useRef<number | null>(null)
+  const lastProgressAnchorRef = useRef<number | null>(null)
   const progressTimeoutRef = useRef<number | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const pendingJumpRef = useRef<number | null>(null)
   const anchorSentenceRef = useRef<number | null>(null)
-  const prevPagesKeyRef = useRef<string>('')
+  const prevPagesStructureRef = useRef<typeof bookStructure.pagesStructure | null>(null)
   const activeBookIdRef = useRef<string | null>(null)
+  const restoredAnchorBookIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const updateCompact = () => setIsCompactHeight(window.innerHeight < 620)
@@ -65,6 +67,9 @@ export default function Reader(): React.JSX.Element {
     if (!initializedPageRef.current || lastLoadedIdRef.current !== book.id) {
       const savedIndex = book.lastPageIndex ?? 0
       lastProgressPageRef.current = savedIndex
+      lastProgressAnchorRef.current = book.lastAnchorSentenceIndex ?? null
+      anchorSentenceRef.current = book.lastAnchorSentenceIndex ?? null
+      restoredAnchorBookIdRef.current = null
       setVisualPageIndex(savedIndex)
       initializedPageRef.current = true
     }
@@ -79,13 +84,28 @@ export default function Reader(): React.JSX.Element {
     if (activeBookIdRef.current !== activeBook?.id) {
       activeBookIdRef.current = activeBook?.id ?? null
       anchorSentenceRef.current = null
-      prevPagesKeyRef.current = ''
+      prevPagesStructureRef.current = null
+      restoredAnchorBookIdRef.current = null
     }
   }, [activeBook?.id])
 
   useEffect(() => {
     if (!activeBook) return
-    if (lastProgressPageRef.current === visualPageIndex) return
+    if (isLoading) return
+    if (
+      typeof activeBook.lastAnchorSentenceIndex === 'number' &&
+      restoredAnchorBookIdRef.current !== activeBook.id
+    ) {
+      return
+    }
+
+    const anchorIndex = anchorSentenceRef.current ?? getAnchorIndexForPage(visualPageIndex)
+    if (
+      lastProgressPageRef.current === visualPageIndex &&
+      lastProgressAnchorRef.current === anchorIndex
+    ) {
+      return
+    }
 
     if (progressTimeoutRef.current) {
       window.clearTimeout(progressTimeoutRef.current)
@@ -93,7 +113,8 @@ export default function Reader(): React.JSX.Element {
 
     progressTimeoutRef.current = window.setTimeout(() => {
       lastProgressPageRef.current = visualPageIndex
-      updateProgress(activeBook.id, visualPageIndex, totalPages || undefined)
+      lastProgressAnchorRef.current = anchorIndex
+      updateProgress(activeBook.id, visualPageIndex, totalPages || undefined, anchorIndex ?? undefined)
     }, 300)
 
     return () => {
@@ -101,16 +122,13 @@ export default function Reader(): React.JSX.Element {
         window.clearTimeout(progressTimeoutRef.current)
       }
     }
-  }, [activeBook, updateProgress, visualPageIndex])
+  }, [activeBook, isLoading, updateProgress, visualPageIndex, totalPages, bookStructure.pagesStructure])
 
   const getAnchorIndexForPage = (pageIndex: number) => {
     const pageBlocks = bookStructure.pagesStructure?.[pageIndex]
     if (!pageBlocks || pageBlocks.length === 0) return null
     for (const block of pageBlocks) {
-      if (block.type === 'image') {
-        return block.startIndex
-      }
-      if (block.content.length > 0) {
+      if (typeof block.startIndex === 'number') {
         return block.startIndex
       }
     }
@@ -128,14 +146,28 @@ export default function Reader(): React.JSX.Element {
 
   useEffect(() => {
     if (!activeBook || isLoading) return
-    const pagesKey = `${bookStructure.pagesStructure.length}:${bookStructure.allSentences.length}`
-    if (!prevPagesKeyRef.current) {
-      prevPagesKeyRef.current = pagesKey
+    if (restoredAnchorBookIdRef.current === activeBook.id) return
+
+    restoredAnchorBookIdRef.current = activeBook.id
+    const savedAnchor = activeBook.lastAnchorSentenceIndex
+    if (typeof savedAnchor !== 'number') return
+
+    anchorSentenceRef.current = savedAnchor
+    const mappedPage = bookStructure.sentenceToPageMap[savedAnchor]
+    if (typeof mappedPage === 'number' && mappedPage !== visualPageIndex) {
+      setVisualPageIndex(mappedPage)
+    }
+  }, [activeBook, isLoading, visualPageIndex, bookStructure.sentenceToPageMap])
+
+  useEffect(() => {
+    if (!activeBook || isLoading) return
+    if (prevPagesStructureRef.current === null) {
+      prevPagesStructureRef.current = bookStructure.pagesStructure
       return
     }
-    if (prevPagesKeyRef.current === pagesKey) return
+    if (prevPagesStructureRef.current === bookStructure.pagesStructure) return
 
-    prevPagesKeyRef.current = pagesKey
+    prevPagesStructureRef.current = bookStructure.pagesStructure
     const anchor = anchorSentenceRef.current
     if (anchor === null) return
     const mappedPage = bookStructure.sentenceToPageMap[anchor]
@@ -145,8 +177,9 @@ export default function Reader(): React.JSX.Element {
   }, [
     activeBook,
     isLoading,
-    bookStructure.pagesStructure.length,
-    bookStructure.allSentences.length
+    bookStructure.pagesStructure,
+    bookStructure.sentenceToPageMap,
+    visualPageIndex
   ])
 
   useEffect(() => {
@@ -155,27 +188,18 @@ export default function Reader(): React.JSX.Element {
     if (anchor !== null) {
       anchorSentenceRef.current = anchor
     }
-  }, [activeBook, isLoading, visualPageIndex])
+  }, [activeBook, isLoading, visualPageIndex, globalSentenceIndex, bookStructure.pagesStructure])
 
   const handleNextPage = () => {
-    setVisualPageIndex((p) => {
-      const newPage = Math.min(totalPages - 1, p + 1)
-      if (activeBook) updateProgress(activeBook.id, newPage, totalPages || undefined)
-      return newPage
-    })
+    setVisualPageIndex((p) => Math.min(totalPages - 1, p + 1))
   }
 
   const handlePrevPage = () => {
-    setVisualPageIndex((p) => {
-      const newPage = Math.max(0, p - 1)
-      if (activeBook) updateProgress(activeBook.id, newPage, totalPages || undefined)
-      return newPage
-    })
+    setVisualPageIndex((p) => Math.max(0, p - 1))
   }
 
   const handleChapterClick = (pageIndex: number) => {
     setVisualPageIndex(pageIndex)
-    if (activeBook) updateProgress(activeBook.id, pageIndex, totalPages || undefined)
   }
 
   const handleJumpToHighlight = () => {

@@ -7,8 +7,9 @@ export interface SavedBook {
   path: string
   cover?: string | null
   dateAdded: string
-  lastPageIndex?: number // <--- New Field
+  lastPageIndex?: number
   totalPages?: number
+  lastAnchorSentenceIndex?: number
 }
 
 export function useLibrary() {
@@ -47,15 +48,29 @@ export function useLibrary() {
     }
   }
 
-  const updateProgress = async (bookId: string, pageIndex: number, totalPages?: number) => {
-    // Optimistically update local state so UI doesn't lag
+  const updateProgress = async (
+    bookId: string,
+    pageIndex: number,
+    totalPages?: number,
+    anchorSentenceIndex?: number
+  ) => {
     setLibrary((prev) =>
       prev.map((b) =>
-        b.id === bookId ? { ...b, lastPageIndex: pageIndex, totalPages } : b
+        b.id === bookId
+          ? {
+              ...b,
+              lastPageIndex: pageIndex,
+              totalPages,
+              lastAnchorSentenceIndex: anchorSentenceIndex
+            }
+          : b
       )
     )
-    // Send to backend
-    await window.api.updateBookProgress(bookId, { lastPageIndex: pageIndex, totalPages })
+    await window.api.updateBookProgress(bookId, {
+      lastPageIndex: pageIndex,
+      totalPages,
+      lastAnchorSentenceIndex: anchorSentenceIndex
+    })
   }
 
   // Load on startup

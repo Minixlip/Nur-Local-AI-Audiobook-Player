@@ -53,6 +53,7 @@ interface SavedBook {
   dateAdded: string
   lastPageIndex?: number
   totalPages?: number
+  lastAnchorSentenceIndex?: number
 }
 
 declare global {
