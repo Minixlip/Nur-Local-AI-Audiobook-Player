@@ -49,6 +49,7 @@ export default function Reader(): React.JSX.Element {
   const pendingJumpRef = useRef<number | null>(null)
   const anchorSentenceRef = useRef<number | null>(null)
   const prevPagesStructureRef = useRef<typeof bookStructure.pagesStructure | null>(null)
+  const prevVisualPageRef = useRef<number | null>(null)
   const activeBookIdRef = useRef<string | null>(null)
   const restoredAnchorBookIdRef = useRef<string | null>(null)
 
@@ -191,6 +192,27 @@ export default function Reader(): React.JSX.Element {
       anchorSentenceRef.current = anchor
     }
   }, [activeBook, isLoading, visualPageIndex, globalSentenceIndex, bookStructure.pagesStructure])
+
+  useEffect(() => {
+    if (!isPlaying || isPaused) return
+    if (globalSentenceIndex < 0) return
+
+    const targetPage = bookStructure.sentenceToPageMap[globalSentenceIndex]
+    if (typeof targetPage !== 'number') return
+    if (targetPage <= visualPageIndex) return
+
+    setVisualPageIndex(targetPage)
+  }, [isPlaying, isPaused, globalSentenceIndex, visualPageIndex, bookStructure.sentenceToPageMap])
+
+  useEffect(() => {
+    const previousPage = prevVisualPageRef.current
+    prevVisualPageRef.current = visualPageIndex
+
+    if (previousPage === null || previousPage === visualPageIndex) return
+    if (pendingJumpRef.current !== null) return
+
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [visualPageIndex])
 
   const handleNextPage = () => {
     setVisualPageIndex((p) => Math.min(totalPages - 1, p + 1))
