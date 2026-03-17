@@ -54,8 +54,8 @@ const AUDIO_CACHE_DISK_LIMIT = 120
 const ENABLE_PREWARM = false
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const STREAMED_PIPER_FIRST_BATCH_WORDS = 1
-const XTTS_FIRST_BATCH_WORDS = 6
-const XTTS_LOW_END_FIRST_BATCH_WORDS = 4
+const XTTS_FIRST_BATCH_WORDS = 1
+const XTTS_LOW_END_FIRST_BATCH_WORDS = 1
 const STREAM_INITIAL_PCM_BYTES = 4096
 const STREAM_STEADY_PCM_BYTES = 16384
 const STREAM_CHUNK_FADE_SEC = 0.008
@@ -660,13 +660,33 @@ export function useAudioPlayer({
       }
     }
 
-    const shouldStreamFirstPiperBatch =
-      engine === 'piper' &&
-      batches[0]?.text !== '[[[IMAGE]]]' &&
-      batches[0]?.globalIndices.length === 1
+    const supportsFirstBatchStreaming = engine === 'piper' || engine === 'xtts'
+    const firstBatch = batches[0]
+    const firstBatchCacheKey =
+      firstBatch && firstBatch.text !== '[[[IMAGE]]]'
+        ? buildCacheKey(firstBatch.text, engine, voicePath, speed)
+        : null
 
-    const streamPiperBatch = async (batch: AudioBatch) => {
-      if (!voicePath) {
+    let shouldStreamFirstBatch =
+      supportsFirstBatchStreaming &&
+      firstBatch?.text !== '[[[IMAGE]]]' &&
+      firstBatch?.globalIndices.length === 1
+
+    if (shouldStreamFirstBatch && firstBatchCacheKey) {
+      if (audioCacheRef.current.has(firstBatchCacheKey)) {
+        shouldStreamFirstBatch = false
+      } else if (audioCacheDbRef.current) {
+        const diskHit = await getCachedAudioFromDisk(audioCacheDbRef.current, firstBatchCacheKey)
+        if (diskHit) {
+          setCache(firstBatchCacheKey, diskHit)
+          shouldStreamFirstBatch = false
+        }
+      }
+    }
+
+    const streamFirstBatch = async (batch: AudioBatch) => {
+      const streamVoicePath = engine === 'xtts' ? voicePath || 'default_speaker.wav' : voicePath
+      if (engine === 'piper' && !streamVoicePath) {
         return { mode: 'fallback' as const, started: false }
       }
 
@@ -674,7 +694,7 @@ export function useAudioPlayer({
       streamAbortControllerRef.current = controller
       let pendingPcm = new Uint8Array(0)
       let scheduledAudio = false
-      let sampleRate = 22050
+      let sampleRate = engine === 'xtts' ? 24000 : 22050
 
       const flushPlayablePcm = (force = false) => {
         const playableLength = pendingPcm.byteLength - (pendingPcm.byteLength % 2)
@@ -710,9 +730,9 @@ export function useAudioPlayer({
           body: JSON.stringify({
             text: batch.text,
             session_id: newSessionId,
-            engine: 'piper',
-            speaker_wav: voicePath,
-            piper_model_path: voicePath,
+            engine,
+            speaker_wav: streamVoicePath || 'default_speaker.wav',
+            piper_model_path: engine === 'piper' ? streamVoicePath || '' : '',
             language: 'en',
             speed
           }),
@@ -765,7 +785,7 @@ export function useAudioPlayer({
           return { mode: 'cancelled' as const, started: scheduledAudio }
         }
 
-        console.warn('Piper stream failed', error)
+        console.warn(`${engine.toUpperCase()} stream failed`, error)
         return scheduledAudio
           ? { mode: 'partial' as const, started: true }
           : { mode: 'fallback' as const, started: false }
@@ -776,7 +796,7 @@ export function useAudioPlayer({
       }
     }
 
-    let nextGenerationIndex = shouldStreamFirstPiperBatch ? 1 : 0
+    let nextGenerationIndex = shouldStreamFirstBatch ? 1 : 0
     const triggerUpTo = (targetExclusive: number) => {
       while (nextGenerationIndex < batches.length && nextGenerationIndex < targetExclusive) {
         triggerGeneration(nextGenerationIndex)
@@ -786,10 +806,10 @@ export function useAudioPlayer({
 
     try {
       setStatus('Buffering...')
-      const firstBatchStreamPromise = shouldStreamFirstPiperBatch ? streamPiperBatch(batches[0]) : null
-      triggerUpTo((shouldStreamFirstPiperBatch ? 1 : 0) + bufferSize)
+      const firstBatchStreamPromise = shouldStreamFirstBatch ? streamFirstBatch(batches[0]) : null
+      triggerUpTo((shouldStreamFirstBatch ? 1 : 0) + bufferSize)
 
-      if (!shouldStreamFirstPiperBatch && batches.length > 0 && audioPromises[0]) {
+      if (!shouldStreamFirstBatch && batches.length > 0 && audioPromises[0]) {
         await audioPromises[0]
       }
 

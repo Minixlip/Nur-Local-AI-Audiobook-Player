@@ -76,6 +76,8 @@ XTTS_SAMPLE_RATE = 24000
 XTTS_LATENT_CACHE_VERSION = "xtts_v2"
 XTTS_SILENCE_THRESHOLD = 350
 XTTS_SILENCE_PAD_MS = 40
+XTTS_STREAM_CHUNK_SIZE = 12
+XTTS_STREAM_OVERLAP_SAMPLES = 1024
 
 piper_voice = None
 loaded_piper_path = None
@@ -224,6 +226,18 @@ def finalize_xtts_audio(wav_out) -> bytes:
     return encode_wav_bytes(wav_int16, XTTS_SAMPLE_RATE)
 
 
+def get_xtts_runtime_model():
+    if xtts_model is None:
+        return None
+
+    synthesizer = getattr(xtts_model, "synthesizer", None)
+    runtime_model = getattr(synthesizer, "tts_model", None)
+    if runtime_model is not None:
+        return runtime_model
+
+    return xtts_model
+
+
 def prepare_xtts_model():
     global xtts_model
 
@@ -267,15 +281,16 @@ def start_xtts_prepare():
 
 @lru_cache(maxsize=8)
 def get_speaker_embedding(speaker_wav: str):
-    if not speaker_wav or xtts_model is None:
+    runtime_model = get_xtts_runtime_model()
+    if not speaker_wav or runtime_model is None:
         return None
     try:
         speaker_path = resolve_resource_path(speaker_wav)
         cached_latents = load_cached_speaker_embedding(speaker_path)
         if cached_latents is not None:
             return cached_latents
-        if hasattr(xtts_model, "get_conditioning_latents"):
-            latents = xtts_model.get_conditioning_latents(speaker_wav=speaker_path)
+        if hasattr(runtime_model, "get_conditioning_latents"):
+            latents = runtime_model.get_conditioning_latents(audio_path=speaker_path)
             if latents is not None:
                 save_cached_speaker_embedding(speaker_path, latents)
             if isinstance(latents, (list, tuple)) and len(latents) >= 2:
@@ -420,27 +435,107 @@ def stream_piper_speech(request: SpeakRequest):
         print("Dropping orphaned stream request")
         raise HTTPException(status_code=499, detail="Request cancelled")
 
-    if request.engine != "piper":
-        raise HTTPException(status_code=400, detail="Streaming is only supported for Piper")
-
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-    voice = ensure_piper_voice(request.piper_model_path)
+    voice = ensure_piper_voice(request.piper_model_path) if request.engine == "piper" else None
+    xtts_speaker_path = None
+    xtts_speaker_latents = None
+
+    if request.engine == "xtts":
+        current_status = get_xtts_status()
+        if current_status["state"] != "ready" or xtts_model is None:
+            raise HTTPException(status_code=409, detail="XTTS is not ready yet")
+
+        xtts_speaker_path = resolve_resource_path(request.speaker_wav)
+        if not os.path.exists(xtts_speaker_path):
+            raise HTTPException(status_code=500, detail=f"Missing speaker wav: {xtts_speaker_path}")
+
+        xtts_speaker_latents = load_cached_speaker_embedding(xtts_speaker_path)
 
     def pcm_stream():
         try:
-            for chunk_bytes in iter_piper_audio_bytes(request.text, request.session_id):
-                yield chunk_bytes
+            if request.engine == "piper":
+                for chunk_bytes in iter_piper_audio_bytes(request.text, request.session_id):
+                    yield chunk_bytes
+                return
+
+            if request.engine != "xtts":
+                raise HTTPException(status_code=400, detail="Unknown engine")
+
+            with gpu_lock:
+                if request.session_id != state.active_session_id:
+                    print("Cancelling XTTS stream for stale session")
+                    return
+
+                runtime_model = get_xtts_runtime_model()
+                if runtime_model is None or not hasattr(runtime_model, "inference_stream"):
+                    raise RuntimeError("XTTS runtime does not support streaming")
+
+                speaker_latents = xtts_speaker_latents
+                if speaker_latents is None:
+                    speaker_latents = get_speaker_embedding(xtts_speaker_path)
+
+                if not (
+                    isinstance(speaker_latents, tuple)
+                    and len(speaker_latents) == 2
+                    and speaker_latents[0] is not None
+                    and speaker_latents[1] is not None
+                ):
+                    raise RuntimeError("XTTS speaker conditioning is unavailable")
+
+                emitted_audio = False
+                with torch.inference_mode():
+                    stream = runtime_model.inference_stream(
+                        text=request.text,
+                        language=request.language,
+                        gpt_cond_latent=speaker_latents[0],
+                        speaker_embedding=speaker_latents[1],
+                        stream_chunk_size=XTTS_STREAM_CHUNK_SIZE,
+                        overlap_wav_len=XTTS_STREAM_OVERLAP_SAMPLES,
+                        speed=request.speed,
+                    )
+
+                    for wav_chunk in stream:
+                        if is_request_cancelled(request.session_id):
+                            print("Cancelling XTTS stream for stale session")
+                            return
+
+                        if torch.is_tensor(wav_chunk):
+                            wav_np = wav_chunk.detach().cpu().numpy()
+                        else:
+                            wav_np = np.asarray(wav_chunk, dtype=np.float32)
+
+                        wav_np = np.asarray(wav_np, dtype=np.float32).reshape(-1)
+                        if wav_np.size == 0:
+                            continue
+
+                        wav_np = np.clip(wav_np, -1, 1)
+                        chunk_bytes = (wav_np * 32767).astype(np.int16).tobytes()
+                        if not chunk_bytes:
+                            continue
+
+                        emitted_audio = True
+                        yield chunk_bytes
+
+                if device == "cuda":
+                    torch.cuda.synchronize()
+
+                if not emitted_audio and not is_request_cancelled(request.session_id):
+                    raise RuntimeError("XTTS generation yielded no audio data")
         except Exception as error:
-            print(f"Piper streaming error: {error}")
+            print(f"{request.engine.upper()} streaming error: {error}")
             raise
 
+    if request.engine not in {"piper", "xtts"}:
+        raise HTTPException(status_code=400, detail="Unknown engine")
+
+    sample_rate = XTTS_SAMPLE_RATE if request.engine == "xtts" else voice.config.sample_rate
     return StreamingResponse(
         pcm_stream(),
         media_type="application/octet-stream",
         headers={
-            "X-Sample-Rate": str(voice.config.sample_rate),
+            "X-Sample-Rate": str(sample_rate),
             "X-Audio-Encoding": "pcm_s16le",
             "X-Audio-Channels": "1",
         },
@@ -488,32 +583,38 @@ def generate_speech(request: SpeakRequest):
                 if request.session_id != state.active_session_id:
                     raise HTTPException(status_code=499, detail="Request cancelled")
 
-                current_xtts = xtts_model
-                if current_xtts is None:
+                runtime_model = get_xtts_runtime_model()
+                if runtime_model is None:
                     raise HTTPException(status_code=409, detail="XTTS is not ready yet")
-
-                tts_kwargs = {
-                    "text": request.text,
-                    "language": request.language,
-                    "speed": request.speed,
-                }
 
                 if speaker_latents is None:
                     speaker_latents = get_speaker_embedding(speaker_path)
 
-                if speaker_latents is not None:
-                    if isinstance(speaker_latents, tuple) and len(speaker_latents) == 2:
-                        tts_kwargs["gpt_cond_latent"] = speaker_latents[0]
-                        tts_kwargs["speaker_embedding"] = speaker_latents[1]
-                    else:
-                        tts_kwargs["speaker_embedding"] = speaker_latents
-                else:
-                    tts_kwargs["speaker_wav"] = speaker_path
-
                 with torch.inference_mode():
-                    wav_out = current_xtts.tts(**tts_kwargs)
+                    if (
+                        isinstance(speaker_latents, tuple)
+                        and len(speaker_latents) == 2
+                        and speaker_latents[0] is not None
+                        and speaker_latents[1] is not None
+                        and hasattr(runtime_model, "inference")
+                    ):
+                        xtts_out = runtime_model.inference(
+                            text=request.text,
+                            language=request.language,
+                            gpt_cond_latent=speaker_latents[0],
+                            speaker_embedding=speaker_latents[1],
+                            speed=request.speed,
+                        )
+                    else:
+                        xtts_out = runtime_model.full_inference(
+                            text=request.text,
+                            ref_audio_path=speaker_path,
+                            language=request.language,
+                            speed=request.speed,
+                        )
                 if device == "cuda":
                     torch.cuda.synchronize()
+                wav_out = xtts_out["wav"] if isinstance(xtts_out, dict) else xtts_out
                 audio_data = finalize_xtts_audio(wav_out)
 
         else:
