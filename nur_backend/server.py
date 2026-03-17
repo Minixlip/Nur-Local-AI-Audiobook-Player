@@ -11,7 +11,8 @@ import numpy as np
 import scipy.io.wavfile
 import torch
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, StreamingResponse
 from piper import PiperVoice
 from pydantic import BaseModel
 from TTS.api import TTS
@@ -73,6 +74,10 @@ xtts_status = {
 
 piper_voice = None
 loaded_piper_path = None
+
+
+def is_request_cancelled(session_id: str) -> bool:
+    return session_id != state.active_session_id
 
 
 def set_xtts_status(state_name: str, message: str):
@@ -171,6 +176,14 @@ def get_speaker_embedding(speaker_wav: str):
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Sample-Rate", "X-Audio-Encoding", "X-Audio-Channels"],
+)
 
 
 class SessionControl(BaseModel):
@@ -189,6 +202,72 @@ class SpeakRequest(BaseModel):
 
 class PrepareModelRequest(BaseModel):
     engine: str
+
+
+def ensure_piper_voice(model_path: str) -> PiperVoice:
+    global piper_voice, loaded_piper_path
+
+    if not model_path or not os.path.exists(model_path):
+        print(f"Piper Error: Path not found: {model_path}")
+        raise HTTPException(status_code=400, detail="Piper model path invalid")
+
+    if loaded_piper_path != model_path:
+        print(f"Loading Piper Model: {model_path}")
+        try:
+            piper_voice = PiperVoice.load(model_path)
+            loaded_piper_path = model_path
+        except Exception as error:
+            print(f"Failed to load Piper: {error}")
+            raise HTTPException(status_code=500, detail=f"Failed to load Piper: {error}")
+
+    if piper_voice is None:
+        raise HTTPException(status_code=500, detail="Piper voice failed to initialize")
+
+    return piper_voice
+
+
+def iter_piper_audio_bytes(text: str, session_id: str):
+    if piper_voice is None:
+        raise RuntimeError("Piper voice is not loaded")
+
+    stream = piper_voice.synthesize(text, None)
+    emitted_audio = False
+
+    for chunk in stream:
+        if is_request_cancelled(session_id):
+            print("Cancelling Piper generation for stale session")
+            break
+
+        if hasattr(chunk, "audio_int16_bytes"):
+            chunk_bytes = chunk.audio_int16_bytes
+        elif hasattr(chunk, "bytes"):
+            chunk_bytes = chunk.bytes
+        else:
+            print(f"Unknown chunk structure: {dir(chunk)}")
+            raise RuntimeError("Cannot extract bytes from AudioChunk")
+
+        if not chunk_bytes:
+            continue
+
+        emitted_audio = True
+        yield chunk_bytes
+
+    if not emitted_audio and not is_request_cancelled(session_id):
+        raise RuntimeError("Piper generation yielded no audio data")
+
+
+def collect_piper_audio_bytes(text: str, session_id: str) -> bytes:
+    raw_audio = b""
+    for chunk_bytes in iter_piper_audio_bytes(text, session_id):
+        raw_audio += chunk_bytes
+
+    if not raw_audio and is_request_cancelled(session_id):
+        raise HTTPException(status_code=499, detail="Request cancelled")
+
+    if len(raw_audio) == 0:
+        raise RuntimeError("Piper generation yielded no audio data")
+
+    return raw_audio
 
 
 @app.post("/session")
@@ -224,11 +303,42 @@ def prepare_model(request: PrepareModelRequest):
     return {"status": "ok", "xtts": start_xtts_prepare()}
 
 
+@app.post("/tts/stream")
+def stream_piper_speech(request: SpeakRequest):
+    if is_request_cancelled(request.session_id):
+        print("Dropping orphaned stream request")
+        raise HTTPException(status_code=499, detail="Request cancelled")
+
+    if request.engine != "piper":
+        raise HTTPException(status_code=400, detail="Streaming is only supported for Piper")
+
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    voice = ensure_piper_voice(request.piper_model_path)
+
+    def pcm_stream():
+        try:
+            for chunk_bytes in iter_piper_audio_bytes(request.text, request.session_id):
+                yield chunk_bytes
+        except Exception as error:
+            print(f"Piper streaming error: {error}")
+            raise
+
+    return StreamingResponse(
+        pcm_stream(),
+        media_type="application/octet-stream",
+        headers={
+            "X-Sample-Rate": str(voice.config.sample_rate),
+            "X-Audio-Encoding": "pcm_s16le",
+            "X-Audio-Channels": "1",
+        },
+    )
+
+
 @app.post("/tts")
 def generate_speech(request: SpeakRequest):
-    global piper_voice, loaded_piper_path
-
-    if request.session_id != state.active_session_id:
+    if is_request_cancelled(request.session_id):
         print("Dropping orphaned request")
         raise HTTPException(status_code=499, detail="Request cancelled")
 
@@ -239,40 +349,14 @@ def generate_speech(request: SpeakRequest):
         audio_data = None
 
         if request.engine == "piper":
-            if not request.piper_model_path or not os.path.exists(request.piper_model_path):
-                print(f"Piper Error: Path not found: {request.piper_model_path}")
-                raise HTTPException(status_code=400, detail="Piper model path invalid")
-
-            if loaded_piper_path != request.piper_model_path:
-                print(f"Loading Piper Model: {request.piper_model_path}")
-                try:
-                    piper_voice = PiperVoice.load(request.piper_model_path)
-                    loaded_piper_path = request.piper_model_path
-                except Exception as error:
-                    print(f"Failed to load Piper: {error}")
-                    raise HTTPException(status_code=500, detail=f"Failed to load Piper: {error}")
-
+            voice = ensure_piper_voice(request.piper_model_path)
             try:
-                stream = piper_voice.synthesize(request.text, None)
-                raw_audio = b""
-
-                for chunk in stream:
-                    if hasattr(chunk, "audio_int16_bytes"):
-                        raw_audio += chunk.audio_int16_bytes
-                    elif hasattr(chunk, "bytes"):
-                        raw_audio += chunk.bytes
-                    else:
-                        print(f"Unknown chunk structure: {dir(chunk)}")
-                        raise Exception("Cannot extract bytes from AudioChunk")
-
-                if len(raw_audio) == 0:
-                    raise Exception("Piper generation yielded no audio data")
-
+                raw_audio = collect_piper_audio_bytes(request.text, request.session_id)
                 audio_np = np.frombuffer(raw_audio, dtype=np.int16)
-                audio_np = trim_silence_int16(audio_np, piper_voice.config.sample_rate)
+                audio_np = trim_silence_int16(audio_np, voice.config.sample_rate)
 
                 out_buf = io.BytesIO()
-                scipy.io.wavfile.write(out_buf, piper_voice.config.sample_rate, audio_np)
+                scipy.io.wavfile.write(out_buf, voice.config.sample_rate, audio_np)
                 audio_data = out_buf.getvalue()
                 out_buf.close()
             except Exception as error:

@@ -52,6 +52,11 @@ const AUDIO_CACHE_DB = 'nur-audio-cache'
 const AUDIO_CACHE_STORE = 'audio'
 const AUDIO_CACHE_DISK_LIMIT = 120
 const ENABLE_PREWARM = false
+const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const STREAMED_PIPER_FIRST_BATCH_WORDS = 1
+const STREAM_INITIAL_PCM_BYTES = 4096
+const STREAM_STEADY_PCM_BYTES = 16384
+const STREAM_CHUNK_FADE_SEC = 0.008
 
 // --- HELPER: Time Estimator ---
 const estimateSentenceDurations = (sentences: string[], totalDuration: number) => {
@@ -134,6 +139,32 @@ const pruneDiskCache = async (db: IDBDatabase) =>
     }
   })
 
+const concatUint8Arrays = (left: Uint8Array, right: Uint8Array) => {
+  const combined = new Uint8Array(left.length + right.length)
+  combined.set(left)
+  combined.set(right, left.length)
+  return combined
+}
+
+const createPcmAudioBuffer = (ctx: AudioContext, pcmBytes: Uint8Array, sampleRate: number) => {
+  const int16 = new Int16Array(
+    pcmBytes.buffer.slice(pcmBytes.byteOffset, pcmBytes.byteOffset + pcmBytes.byteLength)
+  )
+  const audioBuffer = ctx.createBuffer(1, int16.length, sampleRate)
+  const channelData = audioBuffer.getChannelData(0)
+
+  for (let i = 0; i < int16.length; i++) {
+    channelData[i] = int16[i] / 32768
+  }
+
+  return audioBuffer
+}
+
+const getBatchRampForEngine = (engine: string, lowEndMode: boolean) => {
+  const baseRamp = lowEndMode ? LOW_END_BATCH_RAMP : DEFAULT_BATCH_RAMP
+  return engine === 'piper' ? [STREAMED_PIPER_FIRST_BATCH_WORDS, ...baseRamp] : baseRamp
+}
+
 export function useAudioPlayer({
   bookStructure,
   visualPageIndex
@@ -163,6 +194,7 @@ export function useAudioPlayer({
   const decodedAudioCacheKeysRef = useRef<string[]>([])
   const audioCacheDbRef = useRef<IDBDatabase | null>(null)
   const prewarmTimeoutRef = useRef<number | null>(null)
+  const streamAbortControllerRef = useRef<AbortController | null>(null)
 
   const initAudioContext = () => {
     if (!audioCtxRef.current) {
@@ -182,6 +214,45 @@ export function useAudioPlayer({
       } catch {}
     }
     activeSourcesRef.current.clear()
+  }
+
+  const scheduleAudioBuffer = (ctx: AudioContext, audioBuffer: AudioBuffer, fadeSec: number) => {
+    const source = ctx.createBufferSource()
+    source.buffer = audioBuffer
+
+    const start = Math.max(ctx.currentTime, nextStartTimeRef.current)
+    const gainNode = ctx.createGain()
+    const safeFadeSec = Math.min(fadeSec, audioBuffer.duration * 0.25)
+
+    if (safeFadeSec > 0) {
+      gainNode.gain.setValueAtTime(0, start)
+      gainNode.gain.linearRampToValueAtTime(1, start + safeFadeSec)
+      gainNode.gain.setValueAtTime(1, Math.max(start, start + audioBuffer.duration - safeFadeSec))
+      gainNode.gain.linearRampToValueAtTime(0, start + audioBuffer.duration)
+    } else {
+      gainNode.gain.setValueAtTime(1, start)
+    }
+
+    source.connect(gainNode)
+    gainNode.connect(ctx.destination)
+    activeSourcesRef.current.add(source)
+    source.onended = () => {
+      activeSourcesRef.current.delete(source)
+      try {
+        source.disconnect()
+      } catch {}
+      try {
+        gainNode.disconnect()
+      } catch {}
+    }
+
+    source.start(start)
+    const overlap = Math.min(safeFadeSec, audioBuffer.duration * 0.25)
+    const endTime = start + audioBuffer.duration
+    nextStartTimeRef.current = Math.max(start + 0.02, endTime - overlap)
+    playbackEndTimeRef.current = endTime
+
+    return { start, endTime }
   }
 
   const setDecodedCache = (key: string, value: AudioBuffer) => {
@@ -360,7 +431,8 @@ export function useAudioPlayer({
     if (prewarmTimeoutRef.current) window.clearTimeout(prewarmTimeoutRef.current)
     prewarmTimeoutRef.current = window.setTimeout(async () => {
       const lowEndMode = localStorage.getItem('low_end_mode') === 'true'
-      const batchRamp = lowEndMode ? LOW_END_BATCH_RAMP : DEFAULT_BATCH_RAMP
+      const engine = getStoredTtsEngine()
+      const batchRamp = getBatchRampForEngine(engine, lowEndMode)
       const batchSizeStandard = lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
       const maxTtsChars = lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
 
@@ -368,7 +440,6 @@ export function useAudioPlayer({
       const firstBatch = batches[0]
       if (!firstBatch || firstBatch.text === '[[[IMAGE]]]' || !firstBatch.text.trim()) return
 
-      const engine = getStoredTtsEngine()
       const voicePath =
         engine === 'piper'
           ? localStorage.getItem('piper_model_path')
@@ -437,6 +508,8 @@ export function useAudioPlayer({
     highlightCursorRef.current = 0
     playbackEndTimeRef.current = 0
     nextStartTimeRef.current = 0
+    streamAbortControllerRef.current?.abort()
+    streamAbortControllerRef.current = null
     stopActiveSources()
 
     if (audioCtxRef.current) {
@@ -476,6 +549,8 @@ export function useAudioPlayer({
     setGlobalSentenceIndex(-1)
     highlightedSentenceIndexRef.current = -1
     playbackEndTimeRef.current = 0
+    streamAbortControllerRef.current?.abort()
+    streamAbortControllerRef.current = null
     stopActiveSources()
 
     initAudioContext()
@@ -489,8 +564,9 @@ export function useAudioPlayer({
     currentSessionId.current = newSessionId
     await window.api.setSession(newSessionId)
 
+    const engine = getStoredTtsEngine()
     const lowEndMode = localStorage.getItem('low_end_mode') === 'true'
-    const batchRamp = lowEndMode ? LOW_END_BATCH_RAMP : DEFAULT_BATCH_RAMP
+    const batchRamp = getBatchRampForEngine(engine, lowEndMode)
     const batchSizeStandard = lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
     const maxTtsChars = lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
     const initialDefault = lowEndMode ? LOW_END_INITIAL_BUFFER : DEFAULT_INITIAL_BUFFER
@@ -508,22 +584,28 @@ export function useAudioPlayer({
 
     const batches = buildBatches(visualPageIndex, batchRamp, batchSizeStandard, maxTtsChars)
 
-    const audioPromises: Promise<AudioResult>[] = new Array(batches.length).fill(null)
+    const audioPromises: Array<Promise<AudioResult> | null> = new Array(batches.length).fill(null)
     const decodedBuffers: Array<AudioBuffer | null> = new Array(batches.length).fill(null)
     let bufferSize = initialBuffer
     let hasStartedPlayback = false
-    const engine = getStoredTtsEngine()
     const voicePath =
       engine === 'piper'
         ? localStorage.getItem('piper_model_path')
         : localStorage.getItem('custom_voice_path')
     const speed = 1.2
 
+    const markPlaybackStarted = () => {
+      if (!hasStartedPlayback) {
+        setStatus('Reading...')
+        hasStartedPlayback = true
+      }
+    }
+
     const triggerGeneration = (index: number) => {
-      if (index >= batches.length) return
+      if (index >= batches.length || audioPromises[index]) return
       const batch = batches[index]
 
-      if (batch.text === '[[[IMAGE]]]' ) {
+      if (batch.text === '[[[IMAGE]]]') {
         audioPromises[index] = Promise.resolve({ status: 'skipped', audio_data: null })
       } else {
         const cacheKey = buildCacheKey(batch.text, engine, voicePath, speed)
@@ -570,12 +652,138 @@ export function useAudioPlayer({
       }
     }
 
+    const shouldStreamFirstPiperBatch =
+      engine === 'piper' &&
+      batches[0]?.text !== '[[[IMAGE]]]' &&
+      batches[0]?.globalIndices.length === 1
+
+    const streamPiperBatch = async (batch: AudioBatch) => {
+      if (!voicePath) {
+        return { mode: 'fallback' as const, started: false }
+      }
+
+      const controller = new AbortController()
+      streamAbortControllerRef.current = controller
+      let pendingPcm = new Uint8Array(0)
+      let scheduledAudio = false
+      let sampleRate = 22050
+
+      const flushPlayablePcm = (force = false) => {
+        const playableLength = pendingPcm.byteLength - (pendingPcm.byteLength % 2)
+        const minimumLength = scheduledAudio ? STREAM_STEADY_PCM_BYTES : STREAM_INITIAL_PCM_BYTES
+        if (playableLength === 0) return
+        if (!force && playableLength < minimumLength) return
+
+        const pcmChunk = pendingPcm.slice(0, playableLength)
+        pendingPcm = pendingPcm.slice(playableLength)
+
+        const audioBuffer = createPcmAudioBuffer(ctx, pcmChunk, sampleRate)
+        const { start } = scheduleAudioBuffer(
+          ctx,
+          audioBuffer,
+          Math.min(fadeSec, STREAM_CHUNK_FADE_SEC)
+        )
+
+        if (!scheduledAudio) {
+          highlightScheduleRef.current.push({
+            time: start + 0.04,
+            globalIndex: batch.globalIndices[0]
+          })
+        }
+
+        scheduledAudio = true
+        markPlaybackStarted()
+      }
+
+      try {
+        const response = await fetch(`${BACKEND_BASE_URL}/tts/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: batch.text,
+            session_id: newSessionId,
+            engine: 'piper',
+            speaker_wav: voicePath,
+            piper_model_path: voicePath,
+            language: 'en',
+            speed
+          }),
+          signal: controller.signal
+        })
+
+        if (response.status === 499) {
+          return { mode: 'cancelled' as const, started: scheduledAudio }
+        }
+
+        if (!response.ok) {
+          if (!scheduledAudio) {
+            return { mode: 'fallback' as const, started: false }
+          }
+          return { mode: 'partial' as const, started: true }
+        }
+
+        const sampleRateHeader = Number(response.headers.get('x-sample-rate'))
+        if (Number.isFinite(sampleRateHeader) && sampleRateHeader > 0) {
+          sampleRate = sampleRateHeader
+        }
+
+        const reader = response.body?.getReader()
+        if (!reader) {
+          return scheduledAudio
+            ? { mode: 'partial' as const, started: true }
+            : { mode: 'fallback' as const, started: false }
+        }
+
+        while (!stopSignalRef.current) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (!value || value.byteLength === 0) continue
+
+          pendingPcm = concatUint8Arrays(pendingPcm, value)
+          flushPlayablePcm(false)
+        }
+
+        if (stopSignalRef.current) {
+          return { mode: 'cancelled' as const, started: scheduledAudio }
+        }
+
+        flushPlayablePcm(true)
+
+        return scheduledAudio
+          ? { mode: 'success' as const, started: true }
+          : { mode: 'fallback' as const, started: false }
+      } catch (error: any) {
+        if (controller.signal.aborted || error?.name === 'AbortError') {
+          return { mode: 'cancelled' as const, started: scheduledAudio }
+        }
+
+        console.warn('Piper stream failed', error)
+        return scheduledAudio
+          ? { mode: 'partial' as const, started: true }
+          : { mode: 'fallback' as const, started: false }
+      } finally {
+        if (streamAbortControllerRef.current === controller) {
+          streamAbortControllerRef.current = null
+        }
+      }
+    }
+
+    let nextGenerationIndex = shouldStreamFirstPiperBatch ? 1 : 0
+    const triggerUpTo = (targetExclusive: number) => {
+      while (nextGenerationIndex < batches.length && nextGenerationIndex < targetExclusive) {
+        triggerGeneration(nextGenerationIndex)
+        nextGenerationIndex += 1
+      }
+    }
+
     try {
       setStatus('Buffering...')
-      const initialFetch = Math.min(batches.length, bufferSize)
-      for (let i = 0; i < initialFetch; i++) triggerGeneration(i)
+      const firstBatchStreamPromise = shouldStreamFirstPiperBatch ? streamPiperBatch(batches[0]) : null
+      triggerUpTo((shouldStreamFirstPiperBatch ? 1 : 0) + bufferSize)
 
-      if (batches.length > 0) await audioPromises[0]
+      if (!shouldStreamFirstPiperBatch && batches.length > 0 && audioPromises[0]) {
+        await audioPromises[0]
+      }
 
       for (let i = 0; i < batches.length; i++) {
         while (isPausedRef.current) {
@@ -586,12 +794,23 @@ export function useAudioPlayer({
         if (stopSignalRef.current) break
 
         const batch = batches[i]
+        let result: AudioResult | null = null
+
+        if (i === 0 && firstBatchStreamPromise) {
+          const streamResult = await firstBatchStreamPromise
+          if (streamResult.mode === 'cancelled' || stopSignalRef.current) break
+
+          if (streamResult.mode !== 'fallback') {
+            if (i === 0) bufferSize = steadyBuffer
+            triggerUpTo(i + 1 + bufferSize)
+            continue
+          }
+        }
 
         if (!audioPromises[i]) {
           triggerGeneration(i)
         }
 
-        let result: AudioResult | null = null
         try {
           result = await audioPromises[i]
         } catch (err) {
@@ -601,7 +820,7 @@ export function useAudioPlayer({
 
         if (stopSignalRef.current) break
         if (i === 0) bufferSize = steadyBuffer
-        triggerGeneration(i + bufferSize)
+        triggerUpTo(i + 1 + bufferSize)
 
         if (result && result.status === 'skipped') {
           const idx = batch.globalIndices[0]
@@ -628,32 +847,8 @@ export function useAudioPlayer({
             }
             if (!audioBuffer) continue
 
-            const source = ctx.createBufferSource()
-            source.buffer = audioBuffer
-            const start = Math.max(ctx.currentTime, nextStartTimeRef.current)
-            const gainNode = ctx.createGain()
-            gainNode.gain.setValueAtTime(0, start)
-            gainNode.gain.linearRampToValueAtTime(1, start + fadeSec)
-            const endTime = start + audioBuffer.duration
-            gainNode.gain.setValueAtTime(1, Math.max(start, endTime - fadeSec))
-            gainNode.gain.linearRampToValueAtTime(0, endTime)
-            source.connect(gainNode)
-            gainNode.connect(ctx.destination)
-            activeSourcesRef.current.add(source)
-            source.onended = () => {
-              activeSourcesRef.current.delete(source)
-              source.disconnect()
-              gainNode.disconnect()
-            }
-
-            source.start(start)
-            const overlap = Math.min(fadeSec, audioBuffer.duration * 0.25)
-            nextStartTimeRef.current = Math.max(start + 0.02, start + audioBuffer.duration - overlap)
-            playbackEndTimeRef.current = endTime
-            if (!hasStartedPlayback) {
-              setStatus('Reading...')
-              hasStartedPlayback = true
-            }
+            const { start } = scheduleAudioBuffer(ctx, audioBuffer, fadeSec)
+            markPlaybackStarted()
 
             const durations = estimateSentenceDurations(batch.sentences, audioBuffer.duration)
             let accumulatedTime = 0
