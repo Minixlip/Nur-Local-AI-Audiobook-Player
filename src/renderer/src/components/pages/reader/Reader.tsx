@@ -19,6 +19,8 @@ import { BookViewer } from '../../bookViewer'
 import { TableOfContents } from '../../TableOfContents'
 import Tooltip from '../../ui/Tooltip'
 
+const PLAYER_WAVEFORM_HEIGHTS = [10, 15, 21, 13, 18, 24, 16, 20, 12, 19, 14, 17]
+
 export default function Reader(): React.JSX.Element {
   const { bookId } = useParams()
   const navigate = useNavigate()
@@ -313,13 +315,13 @@ export default function Reader(): React.JSX.Element {
           }`}
         >
           <div className="h-6 flex items-center gap-1 opacity-50">
-            {[...Array(12)].map((_, i) => (
+            {PLAYER_WAVEFORM_HEIGHTS.map((height, i) => (
               <div
                 key={i}
                 className={`w-1 ${playerTheme.wave} rounded-full transition-all duration-300 ${
                   isPlaying && !isPaused ? 'animate-pulse' : ''
                 }`}
-                style={{ height: `${Math.random() * 20 + 8}px` }}
+                style={{ height: `${height}px` }}
               ></div>
             ))}
           </div>
