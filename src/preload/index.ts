@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { TtsEngine } from '../shared/tts'
 
 const api = {
   // UPDATED: Now accepts 'options' as the 4th argument (engine, voicePath, etc.)
@@ -8,6 +9,8 @@ const api = {
 
   setSession: (sessionId: string) => ipcRenderer.invoke('tts:setSession', sessionId),
   checkBackend: () => ipcRenderer.invoke('tts:health'),
+  getTtsStatus: () => ipcRenderer.invoke('tts:getStatus'),
+  ensureModel: (engine: TtsEngine) => ipcRenderer.invoke('tts:ensureModel', engine),
 
   // --- NEW: PIPER MANAGEMENT ---
   // Checks if the model exists in user data

@@ -7,29 +7,82 @@ import path from 'path'
 import { net } from 'electron'
 import { exec, execFile, ChildProcess } from 'child_process'
 import { setupLibraryHandlers } from './library'
+import {
+  DEFAULT_TTS_ENGINE,
+  createModelStatus,
+  type TtsEngine,
+  type TtsModelStatus,
+  type TtsStatusSnapshot
+} from '../shared/tts'
 
 let currentPlayer: ChildProcess | null = null
 let backendProcess: ChildProcess | null = null
 
-// --- CONSTANTS FOR MODEL MANAGEMENT ---
 const MODELS_DIR = path.join(app.getPath('userData'), 'models')
 const VOICES_DIR = path.join(app.getPath('userData'), 'voices')
 const VOICES_DB = path.join(VOICES_DIR, 'voices.json')
 const PIPER_FILENAME = 'en_US-lessac-medium.onnx'
 const PIPER_JSON = 'en_US-lessac-medium.onnx.json'
+const BACKEND_HOST = '127.0.0.1'
+const BACKEND_PORT = 8000
 
-// URLs (HuggingFace direct links)
 const PIPER_URL_ONNX =
   'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true'
 const PIPER_URL_JSON =
   'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true'
 
-// Ensure directory exists
 if (!fs.existsSync(MODELS_DIR)) {
   fs.mkdirSync(MODELS_DIR, { recursive: true })
 }
 if (!fs.existsSync(VOICES_DIR)) {
   fs.mkdirSync(VOICES_DIR, { recursive: true })
+}
+
+const getPiperOnnxPath = () => path.join(MODELS_DIR, PIPER_FILENAME)
+const getPiperJsonPath = () => path.join(MODELS_DIR, PIPER_JSON)
+
+const hasPiperModel = () =>
+  fs.existsSync(getPiperOnnxPath()) && fs.existsSync(getPiperJsonPath())
+
+const createMissingPiperState = (): TtsModelStatus =>
+  createModelStatus('piper', 'missing', {
+    progress: 0,
+    path: getPiperOnnxPath(),
+    message: 'Piper will be downloaded automatically on first launch.'
+  })
+
+let piperState: TtsModelStatus = hasPiperModel()
+  ? createModelStatus('piper', 'ready', {
+      progress: 100,
+      path: getPiperOnnxPath(),
+      message: 'Piper is ready.'
+    })
+  : createMissingPiperState()
+
+let piperDownloadPromise: Promise<boolean> | null = null
+
+const getPiperStatus = (): TtsModelStatus => {
+  if (hasPiperModel()) {
+    piperState = createModelStatus('piper', 'ready', {
+      progress: 100,
+      path: getPiperOnnxPath(),
+      message: 'Piper is ready.'
+    })
+  } else if (piperState.state !== 'downloading' && piperState.state !== 'error') {
+    piperState = createMissingPiperState()
+  }
+
+  return piperState
+}
+
+const setPiperStatus = (next: Partial<TtsModelStatus>) => {
+  piperState = {
+    ...piperState,
+    ...next,
+    engine: 'piper',
+    path: getPiperOnnxPath(),
+    ready: (next.state ?? piperState.state) === 'ready'
+  }
 }
 
 const readVoicesDb = () => {
@@ -43,6 +96,211 @@ const readVoicesDb = () => {
 
 const writeVoicesDb = (data: any[]) => {
   fs.writeFileSync(VOICES_DB, JSON.stringify(data, null, 2))
+}
+
+const backendJsonRequest = <T>(method: 'GET' | 'POST', requestPath: string, body?: unknown) => {
+  return new Promise<T | null>((resolve) => {
+    const request = net.request({
+      method,
+      protocol: 'http:',
+      hostname: BACKEND_HOST,
+      port: BACKEND_PORT,
+      path: requestPath
+    })
+
+    if (body !== undefined) {
+      request.setHeader('Content-Type', 'application/json')
+    }
+
+    request.on('error', () => resolve(null))
+    request.on('response', (response) => {
+      if (response.statusCode && response.statusCode >= 400) {
+        resolve(null)
+        return
+      }
+
+      const chunks: Buffer[] = []
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+      response.on('end', () => {
+        try {
+          const payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as T
+          resolve(payload)
+        } catch {
+          resolve(null)
+        }
+      })
+    })
+
+    if (body !== undefined) {
+      request.write(JSON.stringify(body))
+    }
+
+    request.end()
+  })
+}
+
+const getBackendTtsStatus = async (): Promise<{
+  backendOk: boolean
+  backendMessage: string | null
+  device: string | null
+  xtts: TtsModelStatus
+}> => {
+  const payload = await backendJsonRequest<{
+    device?: string
+    xtts?: { state?: TtsModelStatus['state']; message?: string; device?: string }
+  }>('GET', '/models/status')
+
+  if (!payload) {
+    return {
+      backendOk: false,
+      backendMessage: 'Starting Nur engine...',
+      device: null,
+      xtts: createModelStatus('xtts', 'missing', {
+        message: 'Starting Nur engine...'
+      })
+    }
+  }
+
+  const device = payload.xtts?.device || payload.device || 'unknown'
+  const state = payload.xtts?.state || 'missing'
+
+  return {
+    backendOk: true,
+    backendMessage: null,
+    device,
+    xtts: createModelStatus('xtts', state, {
+      message: payload.xtts?.message || 'XTTS is available as an optional download.'
+    })
+  }
+}
+
+const getTtsStatus = async (): Promise<TtsStatusSnapshot> => {
+  const backendStatus = await getBackendTtsStatus()
+  return {
+    backendOk: backendStatus.backendOk,
+    backendMessage: backendStatus.backendMessage,
+    device: backendStatus.device,
+    piper: getPiperStatus(),
+    xtts: backendStatus.xtts
+  }
+}
+
+const downloadToFile = (url: string, destination: string, onProgress?: (progress: number) => void) =>
+  new Promise<void>((resolve, reject) => {
+    const tempPath = `${destination}.download`
+    try {
+      fs.rmSync(tempPath, { force: true })
+    } catch {}
+
+    const file = fs.createWriteStream(tempPath)
+    let completed = false
+
+    const finishWithError = (error: Error) => {
+      if (completed) return
+      completed = true
+      try {
+        file.destroy()
+      } catch {}
+      fs.rm(tempPath, { force: true }, () => reject(error))
+    }
+
+    const request = net.request(url)
+    request.on('response', (response) => {
+      if (response.statusCode !== 200) {
+        finishWithError(new Error(`Failed to download ${path.basename(destination)}: ${response.statusCode}`))
+        return
+      }
+
+      const totalBytes = Number(response.headers['content-length'] || 0)
+      let receivedBytes = 0
+
+      response.on('data', (chunk) => {
+        receivedBytes += chunk.length
+        file.write(chunk)
+        if (onProgress && totalBytes > 0) {
+          onProgress((receivedBytes / totalBytes) * 100)
+        }
+      })
+
+      response.on('end', () => {
+        file.end(async () => {
+          try {
+            await fs.promises.rm(destination, { force: true })
+            await fs.promises.rename(tempPath, destination)
+            if (!completed) {
+              completed = true
+              resolve()
+            }
+          } catch (error: any) {
+            finishWithError(error)
+          }
+        })
+      })
+
+      response.on('error', (error) => finishWithError(error))
+    })
+
+    request.on('error', (error) => finishWithError(error))
+    request.end()
+  })
+
+const ensurePiperDownloaded = async (): Promise<boolean> => {
+  if (hasPiperModel()) {
+    setPiperStatus({
+      state: 'ready',
+      progress: 100,
+      message: 'Piper is ready.'
+    })
+    return true
+  }
+
+  if (piperDownloadPromise) {
+    return piperDownloadPromise
+  }
+
+  piperDownloadPromise = (async () => {
+    try {
+      setPiperStatus({
+        state: 'downloading',
+        progress: 2,
+        message: 'Downloading Piper voice configuration...'
+      })
+      await downloadToFile(PIPER_URL_JSON, getPiperJsonPath())
+
+      setPiperStatus({
+        state: 'downloading',
+        progress: 10,
+        message: 'Downloading default Piper voice...'
+      })
+      await downloadToFile(PIPER_URL_ONNX, getPiperOnnxPath(), (progress) => {
+        const scaled = 10 + progress * 0.9
+        setPiperStatus({
+          state: 'downloading',
+          progress: Math.min(99, Math.round(scaled)),
+          message: 'Downloading default Piper voice...'
+        })
+      })
+
+      setPiperStatus({
+        state: 'ready',
+        progress: 100,
+        message: 'Piper is ready.'
+      })
+      return true
+    } catch (error) {
+      console.error('[Main] Piper download failed:', error)
+      setPiperStatus({
+        state: 'error',
+        progress: 0,
+        message: 'Piper download failed. Retry from Settings.'
+      })
+      return false
+    } finally {
+      piperDownloadPromise = null
+    }
+  })()
+
+  return piperDownloadPromise
 }
 
 function createWindow(): void {
@@ -147,88 +405,35 @@ ipcMain.handle('dialog:openAudioFile', async () => {
   }
 })
 
-// --- NEW: PIPER MODEL MANAGEMENT ---
-
-// 1. CHECK IF MODEL EXISTS
 ipcMain.handle('tts:checkPiper', () => {
-  const onnxPath = path.join(MODELS_DIR, PIPER_FILENAME)
-  const jsonPath = path.join(MODELS_DIR, PIPER_JSON)
-
-  const exists = fs.existsSync(onnxPath) && fs.existsSync(jsonPath)
+  const exists = hasPiperModel()
   return {
     exists,
-    path: onnxPath // Return full path so frontend can pass to python
+    path: getPiperOnnxPath()
   }
 })
 
-// 2. DOWNLOAD MODEL
-ipcMain.handle('tts:downloadPiper', async (event) => {
-  const downloadFile = (url: string, filename: string) => {
-    return new Promise<void>((resolve, reject) => {
-      const filePath = path.join(MODELS_DIR, filename)
-      const file = fs.createWriteStream(filePath)
+ipcMain.handle('tts:downloadPiper', async () => ensurePiperDownloaded())
 
-      const request = net.request(url)
+ipcMain.handle('tts:getStatus', async () => getTtsStatus())
 
-      request.on('response', (response) => {
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to download ${filename}: ${response.statusCode}`))
-          return
-        }
-
-        const totalBytes = parseInt(response.headers['content-length'] as string, 10)
-        let receivedBytes = 0
-
-        response.on('data', (chunk) => {
-          receivedBytes += chunk.length
-          file.write(chunk)
-
-          // Emit progress for ONNX file (it's the big one)
-          if (filename.endsWith('.onnx')) {
-            const progress = totalBytes ? (receivedBytes / totalBytes) * 100 : 0
-            // Send to renderer
-            event.sender.send('download-progress', progress)
-          }
-        })
-
-        response.on('end', () => {
-          file.end()
-          resolve()
-        })
-
-        response.on('error', (err) => {
-          fs.unlink(filePath, () => {}) // delete partial
-          reject(err)
-        })
-      })
-
-      request.end()
-    })
+ipcMain.handle('tts:ensureModel', async (_event, engine: TtsEngine) => {
+  if (engine === 'piper') {
+    await ensurePiperDownloaded()
+    return getTtsStatus()
   }
 
-  try {
-    console.log('[Main] Starting Piper Download...')
-    await downloadFile(PIPER_URL_JSON, PIPER_JSON) // Small config first
-    await downloadFile(PIPER_URL_ONNX, PIPER_FILENAME) // Big model second
-    console.log('[Main] Piper Download Complete.')
-    return true
-  } catch (error: any) {
-    console.error('[Main] Download failed:', error)
-    return false
-  }
+  await backendJsonRequest('POST', '/models/prepare', { engine: 'xtts' })
+  return getTtsStatus()
 })
 
-// --------------------------------
-
-// 1. GENERATE AUDIO
-// --- 1. SET SESSION ---
 ipcMain.handle('tts:setSession', async (_event, sessionId) => {
   return new Promise((resolve) => {
     const request = net.request({
       method: 'POST',
       protocol: 'http:',
-      hostname: '127.0.0.1',
-      port: 8000,
+      hostname: BACKEND_HOST,
+      port: BACKEND_PORT,
       path: '/session'
     })
     request.setHeader('Content-Type', 'application/json')
@@ -243,76 +448,56 @@ ipcMain.handle('tts:setSession', async (_event, sessionId) => {
 })
 
 ipcMain.handle('tts:health', async () => {
-  return new Promise((resolve) => {
-    const request = net.request({
-      method: 'GET',
-      protocol: 'http:',
-      hostname: '127.0.0.1',
-      port: 8000,
-      path: '/health'
-    })
-    request.on('error', () => resolve({ ok: false, ttsReady: false }))
-    request.on('response', (response) => {
-      if (response.statusCode !== 200) {
-        resolve({ ok: false, ttsReady: false })
-        return
-      }
-      const chunks: Buffer[] = []
-      response.on('data', (chunk) => chunks.push(chunk))
-      response.on('end', () => {
-        try {
-          const payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
-          resolve({ ok: true, ttsReady: payload?.tts_ready === true })
-        } catch {
-          resolve({ ok: true, ttsReady: false })
-        }
-      })
-    })
-    request.end()
-  })
+  const status = await getTtsStatus()
+  return {
+    ok: status.backendOk,
+    ttsReady: status.backendOk
+  }
 })
 
-// --- 2. GENERATE AUDIO (UPDATED) ---
-// Now accepts 'sessionId', 'engine', and 'voicePath'
 ipcMain.handle('tts:generate', async (_event, { text, speed, sessionId, engine, voicePath }) => {
   const safeSpeed = speed || 1.0
-  const safeEngine = engine || 'xtts'
+  const safeEngine: TtsEngine = engine === 'xtts' ? 'xtts' : DEFAULT_TTS_ENGINE
 
-  // LOGIC FIX:
-  // If XTTS -> Default to 'default_speaker.wav' if missing
-  // If Piper -> Default to empty string if missing (so backend throws specific error)
   let safeVoice = voicePath
   if (!safeVoice && safeEngine === 'xtts') {
     safeVoice = 'default_speaker.wav'
   }
   if (!safeVoice && safeEngine === 'piper') {
-    safeVoice = ''
+    safeVoice = hasPiperModel() ? getPiperOnnxPath() : ''
   }
 
   return new Promise((resolve, reject) => {
     const request = net.request({
       method: 'POST',
       protocol: 'http:',
-      hostname: '127.0.0.1',
-      port: 8000,
+      hostname: BACKEND_HOST,
+      port: BACKEND_PORT,
       path: '/tts'
     })
 
     request.setHeader('Content-Type', 'application/json')
 
     request.on('response', (response) => {
+      const chunks: Buffer[] = []
+
       // 499 = Client Closed Request (Our custom cancellation code)
       if (response.statusCode === 499) {
         resolve({ status: 'cancelled', audio_data: null })
         return
       }
-      if (response.statusCode !== 200) {
-        reject(`Python Error: ${response.statusCode}`)
-        return
-      }
-      const chunks: Buffer[] = []
       response.on('data', (chunk) => chunks.push(chunk))
       response.on('end', () => {
+        if (response.statusCode !== 200) {
+          const raw = Buffer.concat(chunks).toString('utf-8')
+          try {
+            const payload = JSON.parse(raw) as { detail?: string }
+            reject(payload.detail || `Python Error: ${response.statusCode}`)
+          } catch {
+            reject(raw || `Python Error: ${response.statusCode}`)
+          }
+          return
+        }
         const buffer = Buffer.concat(chunks)
         resolve({ status: 'success', audio_data: buffer })
       })
@@ -320,15 +505,13 @@ ipcMain.handle('tts:generate', async (_event, { text, speed, sessionId, engine, 
 
     request.on('error', (err) => reject(err.message))
 
-    // Pass parameters to Python
-    // If engine is Piper, 'voicePath' contains the path to the ONNX file
     request.write(
       JSON.stringify({
         text: text,
         session_id: sessionId,
         engine: safeEngine,
-        speaker_wav: safeVoice, // XTTS uses this
-        piper_model_path: safeVoice, // PIPER uses this (reusing variable)
+        speaker_wav: safeVoice,
+        piper_model_path: safeVoice,
         language: 'en',
         speed: safeSpeed
       })
@@ -465,6 +648,7 @@ app.whenReady().then(() => {
   setupLibraryHandlers()
 
   startBackend()
+  void ensurePiperDownloaded()
   createWindow()
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

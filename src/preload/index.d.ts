@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { TtsEngine, TtsStatusSnapshot } from '../shared/tts'
 
 declare global {
   interface Window {
@@ -13,7 +14,9 @@ declare global {
       ) => Promise<any>
 
       setSession: (sessionId: string) => Promise<boolean>
-      checkBackend: () => Promise<boolean>
+      checkBackend: () => Promise<{ ok: boolean; ttsReady: boolean }>
+      getTtsStatus: () => Promise<TtsStatusSnapshot>
+      ensureModel: (engine: TtsEngine) => Promise<TtsStatusSnapshot>
       loadAudio: (filepath: string) => Promise<any>
       play: (filepath: string) => Promise<void>
       stop: () => Promise<void>

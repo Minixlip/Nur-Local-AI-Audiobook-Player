@@ -1,85 +1,48 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useReaderSettings } from '../../../hooks/useReaderSettings'
+import { useTtsStatus } from '../../../hooks/useTtsStatus'
+import { setStoredTtsEngine, type TtsEngine } from '../../../utils/tts'
 import Tooltip from '../../ui/Tooltip'
 
 export default function Settings(): React.JSX.Element {
   const { settings } = useReaderSettings()
-  const [engine, setEngine] = useState('xtts')
+  const { engine, status } = useTtsStatus(900)
   const [lowEndMode, setLowEndMode] = useState(false)
   const [initialBuffer, setInitialBuffer] = useState(3)
   const [steadyBuffer, setSteadyBuffer] = useState(8)
   const [crossfadeMs, setCrossfadeMs] = useState(30)
-
-  const [piperStatus, setPiperStatus] = useState<'missing' | 'downloading' | 'ready'>('missing')
-  const [piperPath, setPiperPath] = useState<string>('')
-  const [progress, setProgress] = useState(0)
-
   const [customVoicePath, setCustomVoicePath] = useState<string>('')
 
+  const piperStatus = status.piper
+  const xttsStatus = status.xtts
+  const piperPath = piperStatus.path || ''
+  const piperProgress = piperStatus.progress ?? 0
+
   useEffect(() => {
-    const savedEngine = localStorage.getItem('tts_engine') || 'xtts'
     const savedVoice = localStorage.getItem('custom_voice_path') || ''
     const savedLowEndMode = localStorage.getItem('low_end_mode') === 'true'
     const savedInitialBuffer = Number(localStorage.getItem('audio_buffer_initial') || 3)
     const savedSteadyBuffer = Number(localStorage.getItem('audio_buffer_steady') || 8)
     const savedCrossfadeMs = Number(localStorage.getItem('audio_crossfade_ms') || 30)
 
-    setEngine(savedEngine)
     setCustomVoicePath(savedVoice)
     setLowEndMode(savedLowEndMode)
     setInitialBuffer(Number.isFinite(savedInitialBuffer) ? savedInitialBuffer : 3)
     setSteadyBuffer(Number.isFinite(savedSteadyBuffer) ? savedSteadyBuffer : 8)
     setCrossfadeMs(Number.isFinite(savedCrossfadeMs) ? savedCrossfadeMs : 30)
-
-    checkPiperModel()
-
-    const unsubscribe = window.api.onDownloadProgress((p) => {
-      setProgress(p)
-      if (p >= 100) {
-        setPiperStatus('ready')
-        handleEngineChange('piper', true)
-      }
-    })
-    return () => unsubscribe()
   }, [])
 
-  const checkPiperModel = async () => {
-    // @ts-ignore
-    const { exists, path } = await window.api.checkPiper()
-    if (exists) {
-      setPiperStatus('ready')
-      setPiperPath(path)
-      localStorage.setItem('piper_model_path', path)
-    } else {
-      setPiperStatus('missing')
-      if (localStorage.getItem('tts_engine') === 'piper') {
-        handleEngineChange('xtts')
-      }
+  const handleDownload = async (engineToPrepare: TtsEngine, event?: React.MouseEvent) => {
+    event?.stopPropagation()
+    if (engineToPrepare === 'xtts') {
+      setStoredTtsEngine('xtts')
     }
+    await window.api.ensureModel(engineToPrepare)
   }
 
-  const handleDownload = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setPiperStatus('downloading')
-    setProgress(0)
-
-    const success = await window.api.downloadPiper()
-
-    if (success) {
-      await checkPiperModel()
-    } else {
-      setPiperStatus('missing')
-      alert('Download failed. Please check your internet connection.')
-    }
-  }
-
-  const handleEngineChange = (newEngine: string, force = false) => {
-    if (newEngine === 'piper' && piperStatus !== 'ready' && !force) {
-      return
-    }
-
-    setEngine(newEngine)
-    localStorage.setItem('tts_engine', newEngine)
+  const handleEngineChange = async (newEngine: TtsEngine) => {
+    setStoredTtsEngine(newEngine)
+    await window.api.ensureModel(newEngine)
   }
 
   const handleVoiceSelect = async () => {
@@ -184,16 +147,37 @@ export default function Settings(): React.JSX.Element {
                       Realistic, emotive voices. Supports cloning.
                       <span className="ml-2 text-yellow-500 text-xs font-mono">Requires GPU</span>
                     </div>
+                    {status.device && (
+                      <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                        Backend device: {status.device.toUpperCase()}
+                      </div>
+                    )}
+                    {xttsStatus.message && !xttsStatus.ready && (
+                      <div className="text-xs text-zinc-400 mt-2">{xttsStatus.message}</div>
+                    )}
                   </div>
-                  {engine === 'xtts' ? (
-                    <div className="h-6 w-6 rounded-full bg-white shadow-inner shadow-black/20"></div>
+                  {xttsStatus.ready ? (
+                    engine === 'xtts' ? (
+                      <div className="h-6 w-6 rounded-full bg-white shadow-inner shadow-black/20"></div>
+                    ) : (
+                      <div className="h-6 w-6 rounded-full border-2 border-white/20"></div>
+                    )
+                  ) : xttsStatus.state === 'preparing' || xttsStatus.state === 'downloading' ? (
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-300">
+                        Preparing
+                      </span>
+                      <div className="animate-spin h-5 w-5 border-2 border-white/70 border-t-transparent rounded-full"></div>
+                    </div>
                   ) : (
-                    <div className="h-6 w-6 rounded-full border-2 border-white/20"></div>
+                    <div className="rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-200">
+                      {xttsStatus.state === 'error' ? 'Retry' : 'Download & Use'}
+                    </div>
                   )}
                 </button>
               </Tooltip>
 
-              {engine === 'xtts' && (
+              {engine === 'xtts' && xttsStatus.ready && (
                 <div className="px-5 pb-5 pt-2 border-t border-white/10 bg-black/20">
                   <div className="mt-3 text-sm font-semibold text-zinc-300 mb-2">
                     Voice Cloning (Reference Audio)
@@ -248,16 +232,16 @@ export default function Settings(): React.JSX.Element {
                   : 'bg-white/5 border-white/10'
               }`}
             >
-              {piperStatus === 'downloading' && (
+              {piperStatus.state === 'downloading' && (
                 <div className="absolute bottom-0 left-0 h-1 bg-white/10 w-full">
                   <div
                     className="h-full bg-white/60 transition-all duration-300"
-                    style={{ width: `${progress}%` }}
+                    style={{ width: `${piperProgress}%` }}
                   />
                 </div>
               )}
 
-              {piperStatus === 'ready' ? (
+              {piperStatus.ready ? (
                 <Tooltip label="Select Piper TTS" className="w-full">
                   <button
                     onClick={() => handleEngineChange('piper')}
@@ -268,6 +252,9 @@ export default function Settings(): React.JSX.Element {
                         Piper TTS
                         <span className="text-xs bg-zinc-800 text-zinc-200 px-2 py-0.5 rounded border border-white/10">
                           FAST
+                        </span>
+                        <span className="text-xs bg-emerald-400/10 text-emerald-200 px-2 py-0.5 rounded border border-emerald-300/20">
+                          DEFAULT
                         </span>
                       </div>
                       <div className="text-sm text-zinc-300 mt-1">
@@ -289,26 +276,40 @@ export default function Settings(): React.JSX.Element {
                       <span className="text-xs bg-zinc-800 text-zinc-200 px-2 py-0.5 rounded border border-white/10">
                         FAST
                       </span>
+                      <span className="text-xs bg-emerald-400/10 text-emerald-200 px-2 py-0.5 rounded border border-emerald-300/20">
+                        DEFAULT
+                      </span>
                     </div>
                     <div className="text-sm text-zinc-300 mt-1">
                       Ultra-fast generation. Works on any CPU.
                     </div>
+                    <div className="text-xs text-zinc-400 mt-2">
+                      {piperStatus.message || 'Downloaded automatically on first launch.'}
+                    </div>
                   </div>
 
-                  {piperStatus === 'downloading' ? (
+                  {piperStatus.state === 'downloading' ? (
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-zinc-200 font-mono">
-                        {Math.round(progress)}%
+                        {Math.round(piperProgress)}%
                       </span>
                       <div className="animate-spin h-5 w-5 border-2 border-white/70 border-t-transparent rounded-full"></div>
                     </div>
                   ) : (
-                    <Tooltip label="Download Piper model">
+                    <Tooltip
+                      label={
+                        piperStatus.state === 'error'
+                          ? 'Retry Piper download'
+                          : 'Download Piper model'
+                      }
+                    >
                       <button
-                        onClick={handleDownload}
+                        onClick={(event) => handleDownload('piper', event)}
                         className="z-10 px-4 py-2 bg-white text-black hover:bg-zinc-200 rounded-lg font-bold text-sm shadow-lg transition-transform active:scale-95 flex items-center gap-2"
                       >
-                        <span>Download Model</span>
+                        <span>
+                          {piperStatus.state === 'error' ? 'Retry Download' : 'Download Model'}
+                        </span>
                         <span className="bg-black/10 px-1.5 rounded text-xs">~60MB</span>
                       </button>
                     </Tooltip>
@@ -480,7 +481,7 @@ export default function Settings(): React.JSX.Element {
               Stored by the TTS engine in the user cache directory. Typical path:
             </div>
             <div className="text-xs text-zinc-500 mt-1 break-all">
-              Windows: %USERPROFILE%\\.cache\\tts · macOS/Linux: ~/.cache/tts
+              Windows: %USERPROFILE%\.cache\tts - macOS/Linux: ~/.cache/tts
             </div>
           </div>
         </div>

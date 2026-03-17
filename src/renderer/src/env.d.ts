@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { TtsEngine, TtsStatusSnapshot } from '../../shared/tts'
 
 interface IScanResponse {
   status: string
@@ -15,6 +16,8 @@ interface ICustomAPI {
 
   setSession: (sessionId: string) => Promise<boolean>
   checkBackend: () => Promise<{ ok: boolean; ttsReady: boolean }>
+  getTtsStatus: () => Promise<TtsStatusSnapshot>
+  ensureModel: (engine: TtsEngine) => Promise<TtsStatusSnapshot>
   loadAudio: (filepath: string) => Promise<any>
   play: (filepath: string) => Promise<void>
   stop: () => Promise<void>

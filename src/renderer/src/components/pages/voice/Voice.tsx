@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { getStoredTtsEngine, TTS_ENGINE_CHANGED_EVENT, type TtsEngine } from '../../../utils/tts'
 
 type VoiceSample = {
   id: string
@@ -9,14 +10,15 @@ type VoiceSample = {
 }
 
 export default function Voice() {
-  const [engine, setEngine] = useState('xtts')
+  const [engine, setEngine] = useState<TtsEngine>(getStoredTtsEngine())
   const [customVoicePath, setCustomVoicePath] = useState<string | null>(null)
   const [voiceLibrary, setVoiceLibrary] = useState<VoiceSample[]>([])
   const [pendingVoicePath, setPendingVoicePath] = useState<string | null>(null)
   const [pendingVoiceName, setPendingVoiceName] = useState('')
 
   useEffect(() => {
-    setEngine(localStorage.getItem('tts_engine') || 'xtts')
+    const syncEngine = () => setEngine(getStoredTtsEngine())
+    syncEngine()
     setCustomVoicePath(localStorage.getItem('custom_voice_path'))
     const loadLibrary = async () => {
       try {
@@ -27,6 +29,8 @@ export default function Voice() {
       }
     }
     loadLibrary()
+    window.addEventListener(TTS_ENGINE_CHANGED_EVENT, syncEngine)
+    return () => window.removeEventListener(TTS_ENGINE_CHANGED_EVENT, syncEngine)
   }, [])
 
   const handleUpload = async () => {

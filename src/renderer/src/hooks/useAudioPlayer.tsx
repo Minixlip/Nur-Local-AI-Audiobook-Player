@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { VisualBlock } from '../types/book'
+import { getStoredTtsEngine } from '../utils/tts'
 
 // --- TYPES ---
 interface AudioResult {
@@ -327,7 +328,7 @@ export function useAudioPlayer({
       const firstBatch = batches[0]
       if (!firstBatch || firstBatch.text === '[[[IMAGE]]]' || !firstBatch.text.trim()) return
 
-      const engine = localStorage.getItem('tts_engine') || 'xtts'
+      const engine = getStoredTtsEngine()
       const voicePath =
         engine === 'piper'
           ? localStorage.getItem('piper_model_path')
@@ -468,7 +469,7 @@ export function useAudioPlayer({
       if (batch.text === '[[[IMAGE]]]' ) {
         audioPromises[index] = Promise.resolve({ status: 'skipped', audio_data: null })
       } else {
-        const engine = localStorage.getItem('tts_engine') || 'xtts'
+        const engine = getStoredTtsEngine()
         const voicePath =
           engine === 'piper'
             ? localStorage.getItem('piper_model_path')

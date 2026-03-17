@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { HashRouter as Router, Routes, Route } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
+import { useTtsStatus } from './hooks/useTtsStatus'
+import { getModelStatusForEngine, isEngineReady, setStoredTtsEngine } from './utils/tts'
 
 /* Pages */
 import Library from './components/pages/library/Library'
@@ -10,61 +12,52 @@ import Settings from './components/pages/settings/Settings'
 
 function App(): React.JSX.Element {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const [backendReady, setBackendReady] = useState(false)
-  const [backendHint, setBackendHint] = useState('Starting Nur engine...')
+  const { engine, status } = useTtsStatus(800)
 
   const toggleSidebar = () => setIsSidebarCollapsed((prev) => !prev)
+  const selectedModel = getModelStatusForEngine(status, engine)
+  const backendReady = isEngineReady(status, engine)
 
   useEffect(() => {
-    let isMounted = true
-    let attempts = 0
-    let intervalId: number | undefined
+    if (!status.backendOk) return
+    if (selectedModel.ready) return
+    if (selectedModel.state !== 'missing') return
+    window.api.ensureModel(engine).catch(() => {})
+  }, [engine, selectedModel.ready, selectedModel.state, status.backendOk])
 
-    const checkBackend = async () => {
-      try {
-        const status = await window.api.checkBackend()
-        if (!isMounted) return false
-        if (!status.ok) {
-          setBackendHint('Starting Nur engine...')
-          return false
-        }
-        if (!status.ttsReady) {
-          setBackendHint('Loading speech models...')
-          return false
-        }
-        setBackendReady(true)
-        return true
-      } catch (err) {}
-      return false
+  const getOverlayHint = () => {
+    if (!status.backendOk) {
+      return status.backendMessage || 'Starting Nur engine...'
     }
 
-    const startPolling = async () => {
-      const immediate = await checkBackend()
-      if (immediate) return
-
-      intervalId = window.setInterval(async () => {
-        attempts += 1
-        if (attempts === 10 && isMounted) {
-          setBackendHint('Warming up models... this can take a minute.')
-        }
-        const ready = await checkBackend()
-        if (ready) {
-          if (intervalId) {
-            window.clearInterval(intervalId)
-          }
-        }
-      }, 750)
-    }
-
-    startPolling()
-
-    return () => {
-      isMounted = false
-      if (intervalId) {
-        window.clearInterval(intervalId)
+    if (engine === 'piper') {
+      if (selectedModel.state === 'downloading') {
+        const progress = selectedModel.progress ?? 0
+        return `Downloading the default Piper voice... ${Math.round(progress)}%`
       }
+      if (selectedModel.state === 'error') {
+        return selectedModel.message || 'The default Piper download failed.'
+      }
+      return selectedModel.message || 'Preparing the default Piper voice...'
     }
-  }, [])
+
+    if (selectedModel.state === 'preparing' || selectedModel.state === 'downloading') {
+      return selectedModel.message || 'Preparing XTTS. This can take several minutes.'
+    }
+    if (selectedModel.state === 'error') {
+      return selectedModel.message || 'XTTS preparation failed.'
+    }
+    return selectedModel.message || 'Preparing XTTS...'
+  }
+
+  const handleRetry = async () => {
+    await window.api.ensureModel(engine)
+  }
+
+  const handleUsePiper = async () => {
+    setStoredTtsEngine('piper')
+    await window.api.ensureModel('piper')
+  }
 
   return (
     <Router>
@@ -87,11 +80,45 @@ function App(): React.JSX.Element {
 
         {!backendReady && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/80 backdrop-blur-2xl">
-            <div className="flex flex-col items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-8 py-6 text-center shadow-[0_20px_60px_-40px_rgba(0,0,0,0.8)]">
-              <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-emerald-300" />
+            <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-8 py-6 text-center shadow-[0_20px_60px_-40px_rgba(0,0,0,0.8)]">
+              <div
+                className={`h-12 w-12 rounded-full border-2 border-white/20 ${
+                  selectedModel.state === 'error'
+                    ? 'border-t-red-400'
+                    : 'animate-spin border-t-emerald-300'
+                }`}
+              />
               <div className="text-sm uppercase tracking-[0.3em] text-white/60">NUR</div>
-              <div className="text-lg font-semibold text-zinc-100">Preparing your reader</div>
-              <div className="text-sm text-zinc-400">{backendHint}</div>
+              <div className="text-lg font-semibold text-zinc-100">
+                {engine === 'piper' ? 'Preparing your default voice' : 'Preparing XTTS'}
+              </div>
+              <div className="text-sm text-zinc-400">{getOverlayHint()}</div>
+              {engine === 'piper' && selectedModel.state === 'downloading' && (
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-emerald-300 transition-all duration-300"
+                    style={{ width: `${selectedModel.progress ?? 0}%` }}
+                  />
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+                {selectedModel.state === 'error' && (
+                  <button
+                    onClick={handleRetry}
+                    className="rounded-full border border-white/10 bg-white px-4 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
+                  >
+                    Retry
+                  </button>
+                )}
+                {engine === 'xtts' && (
+                  <button
+                    onClick={handleUsePiper}
+                    className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                  >
+                    Use Piper Instead
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
