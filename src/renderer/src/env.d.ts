@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import type { TtsEngine, TtsStatusSnapshot } from '../../shared/tts'
+import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../../shared/runtime'
 
 interface IScanResponse {
   status: string
@@ -7,17 +8,22 @@ interface IScanResponse {
 }
 
 interface ICustomAPI {
-  generate: (
-    text: string,
-    speed?: number,
-    sessionId?: string,
-    options?: { engine?: string; voicePath?: string | null }
-  ) => Promise<any>
+      generate: (
+        text: string,
+        speed?: number,
+        sessionId?: string,
+        options?: { engine?: string; voicePath?: string | null; quality_mode?: string }
+      ) => Promise<any>
 
   setSession: (sessionId: string) => Promise<boolean>
   checkBackend: () => Promise<{ ok: boolean; ttsReady: boolean }>
   getTtsStatus: () => Promise<TtsStatusSnapshot>
   ensureModel: (engine: TtsEngine) => Promise<TtsStatusSnapshot>
+  getRuntimeStatus: () => Promise<RuntimeStatusSnapshot>
+  restartBackend: () => Promise<TtsStatusSnapshot>
+  checkForUpdates: () => Promise<UpdateStatusSnapshot>
+  quitAndInstallUpdate: () => Promise<boolean>
+  revealLogs: () => Promise<boolean>
   loadAudio: (filepath: string) => Promise<any>
   play: (filepath: string) => Promise<void>
   stop: () => Promise<void>
@@ -26,6 +32,7 @@ interface ICustomAPI {
   onDownloadProgress: (callback: (progress: number) => void) => () => void
   readFile: (filepath: string) => Promise<ArrayBuffer>
   revealPath: (filepath: string) => Promise<boolean>
+  openPath: (filepath: string) => Promise<boolean>
   checkPiper: () => Promise<{ exists: boolean; path: string }>
   downloadPiper: () => Promise<boolean>
   listVoices: () => Promise<any[]>

@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
+import { readJsonFile, writeJsonAtomic } from './storage'
 
 export function setupLibraryHandlers() {
   // 1. DEFINE PATHS
@@ -15,16 +16,11 @@ export function setupLibraryHandlers() {
 
   // 3. HELPER FUNCTIONS
   const readDb = () => {
-    if (!fs.existsSync(DB_PATH)) return []
-    try {
-      return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'))
-    } catch {
-      return []
-    }
+    return readJsonFile<any[]>(DB_PATH, [])
   }
 
   const writeDb = (data: any[]) => {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2))
+    writeJsonAtomic(DB_PATH, data)
   }
 
   // 4. REGISTER HANDLERS

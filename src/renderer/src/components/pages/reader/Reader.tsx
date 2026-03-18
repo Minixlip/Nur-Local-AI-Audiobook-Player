@@ -61,6 +61,52 @@ export default function Reader(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const tagName = target?.tagName
+
+      if (target?.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA') return
+
+      if (event.key === 'Escape') {
+        if (isAppearanceOpen) {
+          setIsAppearanceOpen(false)
+          return
+        }
+        if (isTocOpen) {
+          setIsTocOpen(false)
+        }
+        return
+      }
+
+      if (isAppearanceOpen || isTocOpen) return
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        handlePrevPage()
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        handleNextPage()
+        return
+      }
+
+      if (event.code === 'Space') {
+        event.preventDefault()
+        if (isPlaying) {
+          void (isPaused ? play() : pause())
+          return
+        }
+        void play()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isAppearanceOpen, isPaused, isPlaying, isTocOpen, pause, play, totalPages, visualPageIndex])
+
+  useEffect(() => {
     if (!bookId || loadingLibrary) return
 
     const book = library.find((item) => item.id === bookId) || null
@@ -301,6 +347,48 @@ export default function Reader(): React.JSX.Element {
             wave: 'bg-white'
           }
 
+  const readerTheme =
+    settings.theme === 'light'
+      ? {
+          viewport: 'bg-[#ece8e0]',
+          ambient:
+            'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.9),rgba(236,232,224,0.92)_45%,rgba(223,217,205,0.9)_100%)]',
+          hud: 'bg-white/75 border-black/10 text-zinc-900',
+          surface: 'bg-[#fcfbf7]/95 border-black/10 shadow-[0_32px_80px_rgba(60,48,29,0.14)]',
+          progressTrack: 'bg-black/[0.08]',
+          progressFill: 'bg-zinc-900',
+          eyebrow: 'text-zinc-500',
+          meta: 'text-zinc-600',
+          title: 'text-zinc-900'
+        }
+      : settings.theme === 'sepia'
+        ? {
+            viewport: 'bg-[#e6dcc7]',
+          ambient:
+            'bg-[radial-gradient(circle_at_top,rgba(255,245,220,0.62),rgba(230,220,199,0.92)_52%,rgba(214,201,174,0.9)_100%)]',
+            hud: 'bg-[#f5ecda]/80 border-black/10 text-[#3b2f1f]',
+            surface: 'bg-[#f4ecd8]/95 border-black/10 shadow-[0_32px_80px_rgba(66,43,12,0.16)]',
+            progressTrack: 'bg-black/10',
+            progressFill: 'bg-[#3b2f1f]',
+            eyebrow: 'text-[#7a6652]',
+            meta: 'text-[#6b5844]',
+            title: 'text-[#2f2418]'
+          }
+        : {
+            viewport: 'bg-[#101113]',
+            ambient:
+              'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),rgba(16,17,19,0.72)_45%,rgba(10,11,13,0.95)_100%)]',
+            hud: 'bg-black/35 border-white/10 text-zinc-100',
+            surface: 'bg-[#15171b]/95 border-white/10 shadow-[0_32px_90px_rgba(0,0,0,0.42)]',
+            progressTrack: 'bg-white/10',
+            progressFill: 'bg-emerald-300',
+            eyebrow: 'text-zinc-500',
+            meta: 'text-zinc-400',
+            title: 'text-zinc-100'
+          }
+
+  const pagePercent = totalPages > 0 ? ((visualPageIndex + 1) / totalPages) * 100 : 0
+
   const player = (
     <div
       className={`${
@@ -442,14 +530,11 @@ export default function Reader(): React.JSX.Element {
 
       <div
         ref={scrollContainerRef}
-        className={`flex-1 overflow-y-auto scrollbar-thin transition-colors duration-500 ${
-          settings.theme === 'light'
-            ? 'bg-[#fcfbf9]'
-            : settings.theme === 'sepia'
-              ? 'bg-[#f4ecd8]'
-              : 'bg-[#141416]'
+        className={`relative flex-1 overflow-y-auto scrollbar-thin transition-colors duration-500 ${
+          readerTheme.viewport
         }`}
       >
+        <div className={`pointer-events-none absolute inset-0 ${readerTheme.ambient}`} />
         {isLoading ? (
           <div className="flex h-full items-center justify-center text-zinc-500 animate-pulse">
             Opening Book...
@@ -457,15 +542,59 @@ export default function Reader(): React.JSX.Element {
         ) : error ? (
           <div className="flex h-full items-center justify-center text-red-400">{error}</div>
         ) : (
-          <div className="pt-20 pb-48 px-0">
-            <BookViewer
-              bookStructure={bookStructure}
-              visualPageIndex={visualPageIndex}
-              globalSentenceIndex={globalSentenceIndex}
-              onChapterClick={handleChapterClick}
-              settings={settings}
-            />
-            <div className="mt-10 pb-10 text-center text-xs text-zinc-500">
+          <div className="relative z-10 px-4 pb-48 pt-4 md:px-8">
+            <div
+              className={`sticky top-4 z-20 mx-auto mb-6 max-w-[1180px] rounded-[28px] border backdrop-blur-2xl ${readerTheme.hud}`}
+            >
+              <div className="flex flex-wrap items-center gap-4 px-5 py-4 md:px-6">
+                <button
+                  onClick={() => navigate('/')}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium transition hover:bg-white/10"
+                >
+                  <FiChevronLeft className="text-sm" />
+                  <span>Library</span>
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className={`text-[11px] uppercase tracking-[0.28em] ${readerTheme.eyebrow}`}>
+                    Now Reading
+                  </div>
+                  <div className={`truncate text-lg font-semibold ${readerTheme.title}`}>
+                    {activeBook?.title || 'Reader'}
+                  </div>
+                </div>
+                <div className="min-w-32 text-right">
+                  <div className={`text-[11px] uppercase tracking-[0.24em] ${readerTheme.eyebrow}`}>
+                    Progress
+                  </div>
+                  <div className={`text-sm font-medium ${readerTheme.meta}`}>
+                    Page {visualPageIndex + 1} of {totalPages || 0}
+                  </div>
+                </div>
+              </div>
+              <div className={`h-px w-full ${readerTheme.progressTrack}`} />
+              <div className="px-5 pb-4 pt-3 md:px-6">
+                <div className={`h-1.5 w-full overflow-hidden rounded-full ${readerTheme.progressTrack}`}>
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${readerTheme.progressFill}`}
+                    style={{ width: `${Math.min(100, Math.max(0, pagePercent))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={`mx-auto max-w-[1180px] rounded-[34px] border ${readerTheme.surface}`}>
+              <div className="px-4 py-8 md:px-6 md:py-10">
+                <BookViewer
+                  bookStructure={bookStructure}
+                  visualPageIndex={visualPageIndex}
+                  globalSentenceIndex={globalSentenceIndex}
+                  onChapterClick={handleChapterClick}
+                  settings={settings}
+                />
+              </div>
+            </div>
+
+            <div className={`mt-8 pb-10 text-center text-xs ${readerTheme.meta}`}>
               Page {visualPageIndex + 1} of {totalPages}
             </div>
             {activeBook && isCompactHeight ? player : null}

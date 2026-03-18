@@ -28,6 +28,7 @@ interface ParagraphBlockProps {
 interface ImageBlockProps {
   src: string
   isHighlight: boolean
+  frameClass: string
 }
 
 const normalizeTocLabel = (label: string) => label.trim().toLowerCase()
@@ -50,18 +51,29 @@ const getThemeTextClass = (theme: ReaderSettings['theme']) => {
     case 'sepia':
       return 'text-[#433422]'
     default:
-      return 'text-zinc-300'
+      return 'text-zinc-200'
   }
 }
 
 const getHighlightClass = (theme: ReaderSettings['theme']) => {
   switch (theme) {
     case 'light':
-      return 'bg-yellow-200/50 text-black decoration-clone'
+      return 'bg-yellow-200/60 text-black decoration-clone shadow-[0_0_0_1px_rgba(0,0,0,0.04)]'
     case 'sepia':
-      return 'bg-[#e3d0a6] text-black decoration-clone'
+      return 'bg-[#e3d0a6] text-black decoration-clone shadow-[0_0_0_1px_rgba(91,70,54,0.08)]'
     default:
-      return 'bg-white/10 text-white shadow-[0_0_15px_rgba(255,255,255,0.1)] rounded decoration-clone'
+      return 'bg-emerald-300/10 text-white shadow-[0_0_0_1px_rgba(110,231,183,0.18)] rounded decoration-clone'
+  }
+}
+
+const getImageFrameClass = (theme: ReaderSettings['theme']) => {
+  switch (theme) {
+    case 'light':
+      return 'border-black/10 bg-black/[0.03]'
+    case 'sepia':
+      return 'border-black/10 bg-black/[0.04]'
+    default:
+      return 'border-white/10 bg-white/[0.03]'
   }
 }
 
@@ -76,7 +88,7 @@ const ParagraphBlock = memo(function ParagraphBlock({
 }: ParagraphBlockProps) {
   return (
     <p
-      className={`reader-paragraph mb-6 text-lg md:text-xl leading-relaxed transition-all duration-300 ${fontFamilyClass} ${themeTextClass}`}
+      className={`reader-paragraph mb-7 text-lg md:text-[1.34rem] leading-relaxed tracking-[0.005em] transition-all duration-300 ${fontFamilyClass} ${themeTextClass}`}
       style={{
         fontSize: `${fontSize}%`,
         lineHeight
@@ -109,22 +121,25 @@ const ParagraphBlock = memo(function ParagraphBlock({
   prev.fontSize === next.fontSize &&
   prev.lineHeight === next.lineHeight)
 
-const ImageBlock = memo(function ImageBlock({ src, isHighlight }: ImageBlockProps) {
+const ImageBlock = memo(function ImageBlock({ src, isHighlight, frameClass }: ImageBlockProps) {
   return (
     <div
       className={`my-8 flex justify-center transition-all duration-700 ${
         isHighlight ? 'scale-105 contrast-125' : 'opacity-90'
       }`}
     >
-      <img
-        src={src}
-        alt="Illustration"
-        className="max-w-full rounded-lg shadow-2xl object-contain"
-      />
+      <div className={`overflow-hidden rounded-[28px] border p-3 shadow-2xl ${frameClass}`}>
+        <img
+          src={src}
+          alt="Illustration"
+          className="max-h-[70vh] max-w-full rounded-[22px] object-contain"
+        />
+      </div>
     </div>
   )
 },
-(prev, next) => prev.src === next.src && prev.isHighlight === next.isHighlight)
+(prev, next) =>
+  prev.src === next.src && prev.isHighlight === next.isHighlight && prev.frameClass === next.frameClass)
 
 export const BookViewer: React.FC<BookViewerProps> = ({
   bookStructure,
@@ -137,6 +152,7 @@ export const BookViewer: React.FC<BookViewerProps> = ({
   const fontFamilyClass = getFontFamilyClass(settings.fontFamily)
   const themeTextClass = getThemeTextClass(settings.theme)
   const highlightClass = getHighlightClass(settings.theme)
+  const imageFrameClass = getImageFrameClass(settings.theme)
   const tocLabelToPageIndex = useMemo(() => {
     const lookup = new Map<string, number>()
     for (const item of bookStructure.processedToc || []) {
@@ -151,8 +167,8 @@ export const BookViewer: React.FC<BookViewerProps> = ({
 
   return (
     <div
-      className="reader-prose w-full mx-auto px-4 md:px-10 min-h-[60vh] flex flex-col justify-start transition-all duration-300 ease-in-out"
-      style={{ maxWidth: 'clamp(640px, 72vw, 1200px)' }}
+      className="reader-prose w-full mx-auto min-h-[60vh] px-4 md:px-8 transition-all duration-300 ease-in-out"
+      style={{ maxWidth: 'clamp(640px, 70vw, 1040px)' }}
     >
       {pageBlocks.map((block, blockIdx) => {
         if (block.type === 'image') {
@@ -163,6 +179,7 @@ export const BookViewer: React.FC<BookViewerProps> = ({
               key={`image-${block.startIndex}-${blockIdx}`}
               src={src}
               isHighlight={globalSentenceIndex === block.startIndex}
+              frameClass={imageFrameClass}
             />
           )
         }
@@ -175,10 +192,11 @@ export const BookViewer: React.FC<BookViewerProps> = ({
             <button
               key={`chapter-${block.startIndex}-${blockIdx}`}
               onClick={() => onChapterClick(chapterPageIndex)}
-              className="w-full text-left mt-8 mb-6 group"
+              className="group mb-8 mt-6 w-full rounded-[28px] px-2 py-2 text-left transition hover:bg-white/[0.03]"
             >
+              <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">Section</div>
               <span
-                className={`text-3xl md:text-4xl font-bold tracking-tight transition-colors text-balance ${
+                className={`mt-2 block text-3xl font-bold tracking-tight transition-colors text-balance md:text-4xl ${
                   settings.theme === 'dark'
                     ? 'text-zinc-100 group-hover:text-white'
                     : 'text-zinc-900 group-hover:text-black'

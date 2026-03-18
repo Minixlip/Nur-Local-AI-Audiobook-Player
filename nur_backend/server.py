@@ -76,6 +76,8 @@ XTTS_SAMPLE_RATE = 24000
 XTTS_LATENT_CACHE_VERSION = "xtts_v2"
 XTTS_SILENCE_THRESHOLD = 350
 XTTS_SILENCE_PAD_MS = 40
+XTTS_STUDIO_SILENCE_THRESHOLD = 220
+XTTS_STUDIO_SILENCE_PAD_MS = 70
 XTTS_STREAM_CHUNK_SIZE = 12
 XTTS_STREAM_OVERLAP_SAMPLES = 1024
 
@@ -200,7 +202,7 @@ def warmup_xtts(model):
         return
 
     with torch.inference_mode():
-        model.tts("Ready.", language="en", speaker_wav=warmup_speaker, speed=1.2)
+        model.tts("Ready.", language="en", speaker_wav=warmup_speaker, speed=1.0)
     if device == "cuda":
         torch.cuda.synchronize()
 
@@ -213,15 +215,17 @@ def encode_wav_bytes(samples, sample_rate: int) -> bytes:
     return audio_data
 
 
-def finalize_xtts_audio(wav_out) -> bytes:
+def finalize_xtts_audio(wav_out, quality_mode: str = "balanced") -> bytes:
     wav_np = np.asarray(wav_out, dtype=np.float32)
     wav_np = np.clip(wav_np, -1, 1)
     wav_int16 = (wav_np * 32767).astype(np.int16)
+    threshold = XTTS_STUDIO_SILENCE_THRESHOLD if quality_mode == "studio" else XTTS_SILENCE_THRESHOLD
+    pad_ms = XTTS_STUDIO_SILENCE_PAD_MS if quality_mode == "studio" else XTTS_SILENCE_PAD_MS
     wav_int16 = trim_silence_int16(
         wav_int16,
         XTTS_SAMPLE_RATE,
-        threshold=XTTS_SILENCE_THRESHOLD,
-        pad_ms=XTTS_SILENCE_PAD_MS,
+        threshold=threshold,
+        pad_ms=pad_ms,
     )
     return encode_wav_bytes(wav_int16, XTTS_SAMPLE_RATE)
 
@@ -324,6 +328,7 @@ class SpeakRequest(BaseModel):
     piper_model_path: str = ""
     language: str = "en"
     speed: float = 1.0
+    quality_mode: str = "balanced"
 
 
 class PrepareModelRequest(BaseModel):
@@ -494,6 +499,7 @@ def stream_piper_speech(request: SpeakRequest):
                         stream_chunk_size=XTTS_STREAM_CHUNK_SIZE,
                         overlap_wav_len=XTTS_STREAM_OVERLAP_SAMPLES,
                         speed=request.speed,
+                        enable_text_splitting=True,
                     )
 
                     for wav_chunk in stream:
@@ -604,6 +610,7 @@ def generate_speech(request: SpeakRequest):
                             gpt_cond_latent=speaker_latents[0],
                             speaker_embedding=speaker_latents[1],
                             speed=request.speed,
+                            enable_text_splitting=True,
                         )
                     else:
                         xtts_out = runtime_model.full_inference(
@@ -611,11 +618,12 @@ def generate_speech(request: SpeakRequest):
                             ref_audio_path=speaker_path,
                             language=request.language,
                             speed=request.speed,
+                            enable_text_splitting=True,
                         )
                 if device == "cuda":
                     torch.cuda.synchronize()
                 wav_out = xtts_out["wav"] if isinstance(xtts_out, dict) else xtts_out
-                audio_data = finalize_xtts_audio(wav_out)
+                audio_data = finalize_xtts_audio(wav_out, request.quality_mode)
 
         else:
             raise HTTPException(status_code=400, detail="Unknown engine")

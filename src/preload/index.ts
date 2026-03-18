@@ -11,6 +11,11 @@ const api = {
   checkBackend: () => ipcRenderer.invoke('tts:health'),
   getTtsStatus: () => ipcRenderer.invoke('tts:getStatus'),
   ensureModel: (engine: TtsEngine) => ipcRenderer.invoke('tts:ensureModel', engine),
+  getRuntimeStatus: () => ipcRenderer.invoke('app:getRuntimeStatus'),
+  restartBackend: () => ipcRenderer.invoke('app:restartBackend'),
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  quitAndInstallUpdate: () => ipcRenderer.invoke('app:quitAndInstallUpdate'),
+  revealLogs: () => ipcRenderer.invoke('app:revealLogs'),
 
   // --- NEW: PIPER MANAGEMENT ---
   // Checks if the model exists in user data
@@ -34,6 +39,7 @@ const api = {
   openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
   readFile: (filepath: string) => ipcRenderer.invoke('fs:readFile', { filepath }),
   revealPath: (filepath: string) => ipcRenderer.invoke('fs:revealPath', { filepath }),
+  openPath: (filepath: string) => ipcRenderer.invoke('fs:openPath', { filepath }),
   listVoices: () => ipcRenderer.invoke('voice:list'),
   addVoice: (filePath: string, name: string) =>
     ipcRenderer.invoke('voice:add', { filePath, name }),

@@ -33,6 +33,8 @@ interface CachedAudio {
   audio_data: Uint8Array | null
 }
 
+type XttsQualityMode = 'balanced' | 'studio'
+
 // --- CONSTANTS ---
 const DEFAULT_BATCH_RAMP = [10, 14, 20]
 const DEFAULT_BATCH_SIZE_STANDARD = 40
@@ -53,9 +55,18 @@ const AUDIO_CACHE_STORE = 'audio'
 const AUDIO_CACHE_DISK_LIMIT = 120
 const ENABLE_PREWARM = false
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const TTS_SPEED_STORAGE_KEY = 'tts_playback_speed'
+const XTTS_QUALITY_STORAGE_KEY = 'xtts_quality_mode'
+const DEFAULT_TTS_SPEED = 1.0
+const MIN_TTS_SPEED = 0.85
+const MAX_TTS_SPEED = 1.15
 const STREAMED_PIPER_FIRST_BATCH_WORDS = 1
 const XTTS_FIRST_BATCH_WORDS = 1
 const XTTS_LOW_END_FIRST_BATCH_WORDS = 1
+const XTTS_STUDIO_FIRST_BATCH_WORDS = 18
+const XTTS_STUDIO_BATCH_RAMP = [XTTS_STUDIO_FIRST_BATCH_WORDS, 28, 38]
+const XTTS_STUDIO_BATCH_SIZE_STANDARD = 64
+const XTTS_STUDIO_MAX_TTS_CHARS = 320
 const STREAM_INITIAL_PCM_BYTES = 4096
 const STREAM_STEADY_PCM_BYTES = 16384
 const STREAM_CHUNK_FADE_SEC = 0.008
@@ -162,16 +173,56 @@ const createPcmAudioBuffer = (ctx: AudioContext, pcmBytes: Uint8Array, sampleRat
   return audioBuffer
 }
 
-const getBatchRampForEngine = (engine: string, lowEndMode: boolean) => {
+const clampTtsSpeed = (value: number) => Math.min(MAX_TTS_SPEED, Math.max(MIN_TTS_SPEED, value))
+
+const getStoredTtsSpeed = () => {
+  const stored = Number(localStorage.getItem(TTS_SPEED_STORAGE_KEY))
+  return Number.isFinite(stored) ? clampTtsSpeed(stored) : DEFAULT_TTS_SPEED
+}
+
+const getStoredXttsQualityMode = (): XttsQualityMode => {
+  const stored = localStorage.getItem(XTTS_QUALITY_STORAGE_KEY)
+  return stored === 'balanced' ? 'balanced' : 'studio'
+}
+
+const getBatchRampForEngine = (engine: string, lowEndMode: boolean, xttsQuality: XttsQualityMode) => {
   const baseRamp = lowEndMode ? LOW_END_BATCH_RAMP : DEFAULT_BATCH_RAMP
   if (engine === 'piper') {
     return [STREAMED_PIPER_FIRST_BATCH_WORDS, ...baseRamp]
   }
   if (engine === 'xtts') {
+    if (!lowEndMode && xttsQuality === 'studio') {
+      return XTTS_STUDIO_BATCH_RAMP
+    }
     return [(lowEndMode ? XTTS_LOW_END_FIRST_BATCH_WORDS : XTTS_FIRST_BATCH_WORDS), ...baseRamp]
   }
   return baseRamp
 }
+
+const getBatchSizeStandardForEngine = (
+  engine: string,
+  lowEndMode: boolean,
+  xttsQuality: XttsQualityMode
+) => {
+  if (engine === 'xtts' && !lowEndMode && xttsQuality === 'studio') {
+    return XTTS_STUDIO_BATCH_SIZE_STANDARD
+  }
+  return lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
+}
+
+const getMaxTtsCharsForEngine = (
+  engine: string,
+  lowEndMode: boolean,
+  xttsQuality: XttsQualityMode
+) => {
+  if (engine === 'xtts' && !lowEndMode && xttsQuality === 'studio') {
+    return XTTS_STUDIO_MAX_TTS_CHARS
+  }
+  return lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
+}
+
+const shouldStreamXttsFirstBatch = (lowEndMode: boolean, xttsQuality: XttsQualityMode) =>
+  lowEndMode || xttsQuality !== 'studio'
 
 export function useAudioPlayer({
   bookStructure,
@@ -300,8 +351,13 @@ export function useAudioPlayer({
     }
   }
 
-  const buildCacheKey = (text: string, engine: string, voicePath: string | null, speed: number) =>
-    `${engine}:${voicePath || 'default'}:${speed}:${text}`
+  const buildCacheKey = (
+    text: string,
+    engine: string,
+    voicePath: string | null,
+    speed: number,
+    xttsQuality: XttsQualityMode
+  ) => `${engine}:${voicePath || 'default'}:${speed}:${engine === 'xtts' ? xttsQuality : 'standard'}:${text}`
 
   const setCache = (key: string, value: CachedAudio) => {
     const cache = audioCacheRef.current
@@ -440,9 +496,10 @@ export function useAudioPlayer({
     prewarmTimeoutRef.current = window.setTimeout(async () => {
       const lowEndMode = localStorage.getItem('low_end_mode') === 'true'
       const engine = getStoredTtsEngine()
-      const batchRamp = getBatchRampForEngine(engine, lowEndMode)
-      const batchSizeStandard = lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
-      const maxTtsChars = lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
+      const xttsQuality = getStoredXttsQualityMode()
+      const batchRamp = getBatchRampForEngine(engine, lowEndMode, xttsQuality)
+      const batchSizeStandard = getBatchSizeStandardForEngine(engine, lowEndMode, xttsQuality)
+      const maxTtsChars = getMaxTtsCharsForEngine(engine, lowEndMode, xttsQuality)
 
       const batches = buildBatches(visualPageIndex, batchRamp, batchSizeStandard, maxTtsChars)
       const firstBatch = batches[0]
@@ -452,8 +509,8 @@ export function useAudioPlayer({
         engine === 'piper'
           ? localStorage.getItem('piper_model_path')
           : localStorage.getItem('custom_voice_path')
-      const speed = 1.2
-      const cacheKey = buildCacheKey(firstBatch.text, engine, voicePath, speed)
+      const speed = getStoredTtsSpeed()
+      const cacheKey = buildCacheKey(firstBatch.text, engine, voicePath, speed, xttsQuality)
       const cached = audioCacheRef.current.get(cacheKey)
       if (cached) return
 
@@ -468,7 +525,8 @@ export function useAudioPlayer({
 
       const result = await window.api.generate(firstBatch.text, speed, 'prewarm', {
         engine: engine,
-        voicePath: voicePath
+        voicePath: voicePath,
+        quality_mode: xttsQuality
       })
       if (result?.status === 'success' && result.audio_data) {
         setCache(cacheKey, result as CachedAudio)
@@ -574,9 +632,10 @@ export function useAudioPlayer({
 
     const engine = getStoredTtsEngine()
     const lowEndMode = localStorage.getItem('low_end_mode') === 'true'
-    const batchRamp = getBatchRampForEngine(engine, lowEndMode)
-    const batchSizeStandard = lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
-    const maxTtsChars = lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
+    const xttsQuality = getStoredXttsQualityMode()
+    const batchRamp = getBatchRampForEngine(engine, lowEndMode, xttsQuality)
+    const batchSizeStandard = getBatchSizeStandardForEngine(engine, lowEndMode, xttsQuality)
+    const maxTtsChars = getMaxTtsCharsForEngine(engine, lowEndMode, xttsQuality)
     const initialDefault = lowEndMode ? LOW_END_INITIAL_BUFFER : DEFAULT_INITIAL_BUFFER
     const steadyDefault = lowEndMode ? LOW_END_STEADY_BUFFER : DEFAULT_STEADY_BUFFER
     const storedInitial = Number(localStorage.getItem('audio_buffer_initial'))
@@ -600,7 +659,7 @@ export function useAudioPlayer({
       engine === 'piper'
         ? localStorage.getItem('piper_model_path')
         : localStorage.getItem('custom_voice_path')
-    const speed = 1.2
+    const speed = getStoredTtsSpeed()
 
     const markPlaybackStarted = () => {
       if (!hasStartedPlayback) {
@@ -616,7 +675,7 @@ export function useAudioPlayer({
       if (batch.text === '[[[IMAGE]]]') {
         audioPromises[index] = Promise.resolve({ status: 'skipped', audio_data: null })
       } else {
-        const cacheKey = buildCacheKey(batch.text, engine, voicePath, speed)
+        const cacheKey = buildCacheKey(batch.text, engine, voicePath, speed, xttsQuality)
         const cached = audioCacheRef.current.get(cacheKey)
 
         const resolveAndMaybeDecode = async () => {
@@ -633,7 +692,8 @@ export function useAudioPlayer({
 
           const result = await window.api.generate(batch.text, speed, newSessionId, {
             engine: engine,
-            voicePath: voicePath
+            voicePath: voicePath,
+            quality_mode: xttsQuality
           })
 
           if (result?.status === 'success' && result.audio_data) {
@@ -660,11 +720,12 @@ export function useAudioPlayer({
       }
     }
 
-    const supportsFirstBatchStreaming = engine === 'piper' || engine === 'xtts'
+    const supportsFirstBatchStreaming =
+      engine === 'piper' || (engine === 'xtts' && shouldStreamXttsFirstBatch(lowEndMode, xttsQuality))
     const firstBatch = batches[0]
     const firstBatchCacheKey =
       firstBatch && firstBatch.text !== '[[[IMAGE]]]'
-        ? buildCacheKey(firstBatch.text, engine, voicePath, speed)
+        ? buildCacheKey(firstBatch.text, engine, voicePath, speed, xttsQuality)
         : null
 
     let shouldStreamFirstBatch =
@@ -734,7 +795,8 @@ export function useAudioPlayer({
             speaker_wav: streamVoicePath || 'default_speaker.wav',
             piper_model_path: engine === 'piper' ? streamVoicePath || '' : '',
             language: 'en',
-            speed
+            speed,
+            quality_mode: xttsQuality
           }),
           signal: controller.signal
         })
@@ -869,7 +931,7 @@ export function useAudioPlayer({
           try {
             let audioBuffer = decodedBuffers[i]
             if (!audioBuffer) {
-              const cacheKey = buildCacheKey(batch.text, engine, voicePath, speed)
+              const cacheKey = buildCacheKey(batch.text, engine, voicePath, speed, xttsQuality)
               audioBuffer = await decodeToBuffer(cacheKey, result as CachedAudio)
               if (audioBuffer) decodedBuffers[i] = audioBuffer
             }

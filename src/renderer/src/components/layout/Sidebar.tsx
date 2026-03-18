@@ -1,8 +1,8 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { FiArrowRight, FiBookOpen, FiChevronLeft, FiChevronRight } from 'react-icons/fi'
 import { RiBookShelfLine } from 'react-icons/ri'
 import { TiMicrophoneOutline } from 'react-icons/ti'
 import { TbSettings } from 'react-icons/tb'
-import { FiChevronLeft, FiChevronRight } from 'react-icons/fi'
 import { useLibrary } from '../../hooks/useLibrary'
 import Tooltip from '../ui/Tooltip'
 
@@ -12,12 +12,12 @@ type SidebarProps = {
 }
 
 const navClass = (isActive: boolean, collapsed: boolean) =>
-  `w-full flex items-center gap-3 rounded-2xl transition-all duration-300 text-sm font-medium ${
-    collapsed ? 'justify-center px-2 py-3.5' : 'px-4 py-3.5'
+  `group relative w-full flex items-center gap-3 rounded-2xl border text-sm font-medium transition-all duration-300 ${
+    collapsed ? 'justify-center px-2.5 py-3.5' : 'px-4 py-3.5'
   } ${
     isActive
-      ? 'bg-white/10 text-white shadow-[0_10px_30px_rgba(0,0,0,0.25)]'
-      : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/5'
+      ? 'border-white/15 bg-white/10 text-white shadow-[0_14px_32px_rgba(0,0,0,0.22)]'
+      : 'border-transparent bg-white/0 text-zinc-400 hover:border-white/10 hover:bg-white/5 hover:text-zinc-100'
   }`
 
 const navItems = [
@@ -35,24 +35,31 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
 
   return (
     <aside
-      className={`flex-shrink-0 overflow-hidden bg-white/5 backdrop-blur-2xl border-r border-white/10 flex flex-col p-5 gap-6 z-20 transition-[width] duration-300 ${
-        collapsed ? 'w-20' : 'w-72'
+      className={`relative flex-shrink-0 overflow-hidden border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] backdrop-blur-2xl flex flex-col p-5 gap-6 z-20 transition-[width] duration-300 ${
+        collapsed ? 'w-20' : 'w-[19rem]'
       }`}
       aria-label="Sidebar"
     >
-      <div className={`flex items-center justify-between ${collapsed ? 'px-1' : 'px-2'}`}>
-        <div
-          className={`uppercase text-zinc-500 ${
-            collapsed ? 'text-[10px] tracking-[0.2em] hidden' : 'text-xs tracking-[0.35em]'
-          }`}
-        >
-          Nur
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_35%)]" />
+
+      <div className={`relative z-10 flex items-center justify-between ${collapsed ? 'px-1' : 'px-1'}`}>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] text-[11px] font-semibold tracking-[0.25em] text-white shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
+            N
+          </div>
+          {!collapsed && (
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Nur</div>
+              <div className="mt-1 text-xs text-zinc-400">Reader</div>
+            </div>
+          )}
         </div>
-          <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-            <button
-              onClick={onToggleCollapse}
-              className={`rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
-                collapsed ? 'h-7 w-7' : 'h-8 w-8'
+
+        <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <button
+            onClick={onToggleCollapse}
+            className={`flex items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${
+              collapsed ? 'h-8 w-8' : 'h-9 w-9'
             }`}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
@@ -61,7 +68,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
         </Tooltip>
       </div>
 
-      <nav className="flex flex-col gap-2 mt-4 flex-none">
+      <nav className="relative z-10 mt-1 flex flex-col gap-2 flex-none">
         {navItems.map((item) => {
           const isActive =
             item.path === '/' ? isLibraryActive : location.pathname.startsWith(item.path)
@@ -72,16 +79,9 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
           ) : (
             <>
               <span className="text-lg">{item.icon}</span>
-              <span
-                className={`transition-all duration-300 ${
-                  collapsed ? 'opacity-0 translate-x-2' : 'opacity-100 translate-x-0'
-                }`}
-              >
-                {item.label}
-              </span>
+              <span>{item.label}</span>
             </>
           )
-          const revealDelay = collapsed ? '0ms' : `${120 + navItems.indexOf(item) * 60}ms`
 
           if (item.path === '/') {
             return (
@@ -90,9 +90,11 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
                   onClick={() => navigate('/')}
                   className={navClass(isActive, collapsed)}
                   aria-label={item.label}
-                  style={{ transitionDelay: revealDelay }}
                 >
                   {content}
+                  {!collapsed && (
+                    <FiArrowRight className="ml-auto text-xs text-zinc-500 opacity-0 transition group-hover:opacity-100" />
+                  )}
                   {collapsed && <span className="sr-only">{item.label}</span>}
                 </button>
               </Tooltip>
@@ -101,13 +103,11 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
 
           return (
             <Tooltip key={item.path} label={item.label} className="w-full">
-              <NavLink
-                to={item.path}
-                className={() => navClass(isActive, collapsed)}
-                aria-label={item.label}
-                style={{ transitionDelay: revealDelay }}
-              >
+              <NavLink to={item.path} className={() => navClass(isActive, collapsed)} aria-label={item.label}>
                 {content}
+                {!collapsed && (
+                  <FiArrowRight className="ml-auto text-xs text-zinc-500 opacity-0 transition group-hover:opacity-100" />
+                )}
                 {collapsed && <span className="sr-only">{item.label}</span>}
               </NavLink>
             </Tooltip>
@@ -116,42 +116,55 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
       </nav>
 
       {!collapsed && (
-        <div className="mt-6 flex-1 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.25)] flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-1 mb-3">
-            <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
-              Recent Reads
-            </h4>
-            <span className="text-[10px] text-zinc-500">{library.length} total</span>
-          </div>
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 gap-3">
-              {library.slice(0, 8).map((book) => (
-                <button
-                  key={book.id}
-                  onClick={() => navigate(`/read/${book.id}`)}
-                  className="group rounded-xl border border-white/10 bg-white/5 overflow-hidden cursor-pointer transition hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/10 shadow-sm"
-                  aria-label={`Open ${book.title}`}
-                >
-                  <div className="relative aspect-[2/3]">
-                    {book.cover ? (
-                      <img src={book.cover} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[10px] text-zinc-400 bg-zinc-800/60">
-                        Book
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <span className="text-[10px] uppercase tracking-wide text-white/90">
-                        Open
-                      </span>
-                    </div>
-                  </div>
-                  <div className="px-2 py-2 text-left">
-                    <div className="text-[11px] text-zinc-200 truncate">{book.title}</div>
-                  </div>
-                </button>
-              ))}
+        <div className="relative z-10 mt-6 flex-1 min-h-0 rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.24)] flex flex-col">
+          <div className="flex items-center justify-between px-1">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-zinc-500">
+                Recent Reads
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">{library.length} in library</div>
             </div>
+            <FiBookOpen className="text-zinc-500" />
+          </div>
+
+          <div className="mt-4 flex-1 overflow-y-auto pr-1">
+            {library.length > 0 ? (
+              <div className="space-y-2.5">
+                {library.slice(0, 6).map((book) => (
+                  <button
+                    key={book.id}
+                    onClick={() => navigate(`/read/${book.id}`)}
+                    className="group flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/10"
+                    aria-label={`Open ${book.title}`}
+                  >
+                    <div className="relative h-12 w-9 flex-shrink-0 overflow-hidden rounded-xl border border-white/10 bg-zinc-900/70">
+                      {book.cover ? (
+                        <img src={book.cover} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-500">
+                          Book
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-zinc-100">{book.title}</div>
+                      <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-zinc-500">
+                        <span>
+                          {typeof book.lastPageIndex === 'number' && book.lastPageIndex > 0
+                            ? `Page ${book.lastPageIndex + 1}`
+                            : 'New'}
+                        </span>
+                        <FiArrowRight className="text-[9px] opacity-0 transition group-hover:opacity-100" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-full min-h-32 items-center justify-center rounded-[1.25rem] border border-dashed border-white/10 bg-black/10 px-4 text-center text-sm text-zinc-500">
+                Your recent reads will appear here once you add a book.
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -8,15 +8,28 @@ import { net } from 'electron'
 import { exec, execFile, ChildProcess } from 'child_process'
 import { setupLibraryHandlers } from './library'
 import {
+  appendBackendLogLine,
+  getBackendLogPath,
+  getLogsDir,
+  getMainLogPath,
+  installFileLogger
+} from './logger'
+import { readJsonFile, writeJsonAtomic } from './storage'
+import { checkForUpdates, getUpdateStatus, initAutoUpdater, quitAndInstallUpdate } from './updater'
+import {
   DEFAULT_TTS_ENGINE,
   createModelStatus,
+  type TtsBackendState,
   type TtsEngine,
   type TtsModelStatus,
   type TtsStatusSnapshot
 } from '../shared/tts'
+import type { RuntimeStatusSnapshot } from '../shared/runtime'
 
 let currentPlayer: ChildProcess | null = null
 let backendProcess: ChildProcess | null = null
+
+installFileLogger()
 
 const MODELS_DIR = path.join(app.getPath('userData'), 'models')
 const VOICES_DIR = path.join(app.getPath('userData'), 'voices')
@@ -25,11 +38,36 @@ const PIPER_FILENAME = 'en_US-lessac-medium.onnx'
 const PIPER_JSON = 'en_US-lessac-medium.onnx.json'
 const BACKEND_HOST = '127.0.0.1'
 const BACKEND_PORT = 8000
+const APP_ID = 'com.minixlip.nur'
+const REPOSITORY_URL = 'https://github.com/Minixlip/nur'
+const isSmokeTest = process.argv.includes('--smoke-test') || process.env.NUR_SMOKE_TEST === '1'
 
 const PIPER_URL_ONNX =
   'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true'
 const PIPER_URL_JSON =
   'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true'
+
+type BackendRuntimeState = {
+  state: TtsBackendState
+  path: string | null
+  configured: boolean
+  running: boolean
+  message: string | null
+  lastError: string | null
+}
+
+const backendState: BackendRuntimeState = {
+  state: 'starting',
+  path: null,
+  configured: false,
+  running: false,
+  message: 'Nur engine has not started yet.',
+  lastError: null
+}
+
+const setBackendState = (next: Partial<BackendRuntimeState>) => {
+  Object.assign(backendState, next)
+}
 
 if (!fs.existsSync(MODELS_DIR)) {
   fs.mkdirSync(MODELS_DIR, { recursive: true })
@@ -86,16 +124,11 @@ const setPiperStatus = (next: Partial<TtsModelStatus>) => {
 }
 
 const readVoicesDb = () => {
-  if (!fs.existsSync(VOICES_DB)) return []
-  try {
-    return JSON.parse(fs.readFileSync(VOICES_DB, 'utf-8'))
-  } catch {
-    return []
-  }
+  return readJsonFile<any[]>(VOICES_DB, [])
 }
 
 const writeVoicesDb = (data: any[]) => {
-  fs.writeFileSync(VOICES_DB, JSON.stringify(data, null, 2))
+  writeJsonAtomic(VOICES_DB, data)
 }
 
 const backendJsonRequest = <T>(method: 'GET' | 'POST', requestPath: string, body?: unknown) => {
@@ -139,6 +172,42 @@ const backendJsonRequest = <T>(method: 'GET' | 'POST', requestPath: string, body
   })
 }
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const getRuntimeStatus = (): RuntimeStatusSnapshot => ({
+  diagnostics: {
+    appName: 'Nur',
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    packaged: app.isPackaged,
+    appId: APP_ID,
+    repositoryUrl: REPOSITORY_URL,
+    userDataPath: app.getPath('userData'),
+    modelsDir: MODELS_DIR,
+    voicesDir: VOICES_DIR,
+    logsDir: getLogsDir(),
+    mainLogPath: getMainLogPath(),
+    backendLogPath: getBackendLogPath(),
+    backendPath: backendState.path,
+    backendConfigured: backendState.configured,
+    backendRunning: backendState.running,
+    backendMessage: backendState.lastError || backendState.message
+  },
+  update: getUpdateStatus()
+})
+
+const waitForBackendReady = async (timeoutMs = 12000) => {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await getBackendTtsStatus()
+    if (status.backendOk) return true
+    await wait(400)
+  }
+
+  return false
+}
+
 const getBackendTtsStatus = async (): Promise<{
   backendOk: boolean
   backendMessage: string | null
@@ -151,18 +220,33 @@ const getBackendTtsStatus = async (): Promise<{
   }>('GET', '/models/status')
 
   if (!payload) {
+    const backendMessage =
+      backendState.lastError ||
+      backendState.message ||
+      (backendState.configured
+        ? 'Waiting for Nur engine...'
+        : 'Nur engine executable is missing from this build.')
+
     return {
       backendOk: false,
-      backendMessage: 'Starting Nur engine...',
+      backendMessage,
       device: null,
       xtts: createModelStatus('xtts', 'missing', {
-        message: 'Starting Nur engine...'
+        message: backendMessage
       })
     }
   }
 
   const device = payload.xtts?.device || payload.device || 'unknown'
   const state = payload.xtts?.state || 'missing'
+  if (backendState.state !== 'running' || !backendState.running) {
+    setBackendState({
+      state: 'running',
+      running: true,
+      message: 'Nur engine is running.',
+      lastError: null
+    })
+  }
 
   return {
     backendOk: true,
@@ -178,7 +262,10 @@ const getTtsStatus = async (): Promise<TtsStatusSnapshot> => {
   const backendStatus = await getBackendTtsStatus()
   return {
     backendOk: backendStatus.backendOk,
+    backendState: backendState.state,
     backendMessage: backendStatus.backendMessage,
+    backendLogPath: getBackendLogPath(),
+    mainLogPath: getMainLogPath(),
     device: backendStatus.device,
     piper: getPiperStatus(),
     xtts: backendStatus.xtts
@@ -359,15 +446,77 @@ const getBackendExecutablePath = () => {
 const startBackend = () => {
   if (backendProcess) return
   const backendPath = getBackendExecutablePath()
+  setBackendState({
+    state: backendPath ? 'starting' : 'missing',
+    path: backendPath,
+    configured: Boolean(backendPath),
+    running: false,
+    message: backendPath ? 'Starting Nur engine...' : 'Nur engine executable was not found.',
+    lastError: backendPath ? null : 'Nur engine executable was not found.'
+  })
+
   if (!backendPath) {
     console.warn('[Main] Backend executable not found. Skipping auto-start.')
     return
   }
-  backendProcess = execFile(backendPath, [], { windowsHide: true }, (error) => {
-    if (error) {
-      console.error('[Main] Backend exited with error:', error.message)
+
+  const child = execFile(backendPath, [], { windowsHide: true })
+  backendProcess = child
+
+  child.once('spawn', () => {
+    setBackendState({
+      state: 'running',
+      path: backendPath,
+      configured: true,
+      running: true,
+      message: 'Nur engine is running.',
+      lastError: null
+    })
+    console.log('[Main] Nur engine started:', backendPath)
+  })
+
+  child.stdout?.on('data', (chunk) => {
+    const message = String(chunk).trim()
+    if (message) {
+      appendBackendLogLine(`[stdout] ${message}`)
+      console.log('[Nur engine]', message)
     }
+  })
+
+  child.stderr?.on('data', (chunk) => {
+    const message = String(chunk).trim()
+    if (message) {
+      appendBackendLogLine(`[stderr] ${message}`)
+      console.error('[Nur engine]', message)
+    }
+  })
+
+  child.on('error', (error) => {
+    const message = `Nur engine failed to start: ${error.message}`
+    setBackendState({
+      state: 'error',
+      running: false,
+      message,
+      lastError: message
+    })
+    appendBackendLogLine(`[error] ${message}`)
+    console.error('[Main]', message)
+  })
+
+  child.on('exit', (code, signal) => {
     backendProcess = null
+    const isExpectedShutdown = signal === 'SIGTERM' || signal === 'SIGINT'
+    const message = isExpectedShutdown
+      ? 'Nur engine stopped.'
+      : `Nur engine exited unexpectedly (${code ?? signal ?? 'unknown'}).`
+    setBackendState({
+      state: isExpectedShutdown ? 'stopped' : 'error',
+      running: false,
+      message,
+      lastError: isExpectedShutdown ? null : message
+    })
+    appendBackendLogLine(`[exit] ${message}`)
+    console.warn('[Main]', message)
   })
 }
 
@@ -377,6 +526,45 @@ const stopBackend = () => {
     backendProcess.kill()
   } catch (err) {}
   backendProcess = null
+  setBackendState({
+    state: 'stopped',
+    running: false,
+    message: 'Nur engine stopped.',
+    lastError: null
+  })
+  appendBackendLogLine('[stop] Nur engine stopped.')
+}
+
+const restartBackend = async () => {
+  stopBackend()
+  await wait(250)
+  startBackend()
+  await waitForBackendReady()
+  return getTtsStatus()
+}
+
+const runSmokeTest = async () => {
+  console.log('[Smoke] Starting packaged smoke test...')
+  startBackend()
+
+  const backendReady = await waitForBackendReady(15000)
+  if (!backendReady) {
+    console.error('[Smoke] Backend failed to become ready.', getRuntimeStatus())
+    app.exit(1)
+    return
+  }
+
+  if (process.env.NUR_SMOKE_DOWNLOAD_PIPER === '1') {
+    const piperReady = await ensurePiperDownloaded()
+    if (!piperReady) {
+      console.error('[Smoke] Piper download failed.')
+      app.exit(1)
+      return
+    }
+  }
+
+  console.log('[Smoke] Smoke test passed.')
+  app.exit(0)
 }
 
 // --- NEW: FILE DIALOG HANDLER ---
@@ -416,6 +604,24 @@ ipcMain.handle('tts:checkPiper', () => {
 ipcMain.handle('tts:downloadPiper', async () => ensurePiperDownloaded())
 
 ipcMain.handle('tts:getStatus', async () => getTtsStatus())
+
+ipcMain.handle('app:getRuntimeStatus', async () => getRuntimeStatus())
+
+ipcMain.handle('app:restartBackend', async () => restartBackend())
+
+ipcMain.handle('app:checkForUpdates', async () => checkForUpdates())
+
+ipcMain.handle('app:quitAndInstallUpdate', async () => quitAndInstallUpdate())
+
+ipcMain.handle('app:revealLogs', async () => {
+  try {
+    shell.showItemInFolder(getMainLogPath())
+    return true
+  } catch (error) {
+    console.error('[Main] Reveal logs failed:', error)
+    return false
+  }
+})
 
 ipcMain.handle('tts:ensureModel', async (_event, engine: TtsEngine) => {
   if (engine === 'piper') {
@@ -591,6 +797,17 @@ ipcMain.handle('fs:revealPath', async (_event, { filepath }) => {
   }
 })
 
+ipcMain.handle('fs:openPath', async (_event, { filepath }) => {
+  try {
+    if (!filepath) return false
+    const result = await shell.openPath(filepath)
+    return result === ''
+  } catch (err) {
+    console.error('[Main] Open path failed:', err)
+    return false
+  }
+})
+
 // 7. VOICE LIBRARY
 ipcMain.handle('voice:list', async () => {
   return readVoicesDb()
@@ -640,16 +857,27 @@ ipcMain.handle('voice:remove', async (_event, { id }) => {
 })
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
   setupLibraryHandlers()
+  initAutoUpdater()
 
   startBackend()
+  if (isSmokeTest) {
+    void runSmokeTest()
+    return
+  }
+
   void ensurePiperDownloaded()
   createWindow()
+  if (app.isPackaged) {
+    setTimeout(() => {
+      void checkForUpdates()
+    }, 12000)
+  }
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

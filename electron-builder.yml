@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: nur
+appId: com.minixlip.nur
+productName: Nur
 directories:
   buildResources: build
 files:
@@ -23,7 +23,7 @@ extraResources:
     to: resources
 win:
   target:
-    - target: msi
+    - target: nsis
       arch:
         - x64
   executableName: nur
@@ -47,13 +47,14 @@ linux:
     - AppImage
     - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: Mo Shihab
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: Minixlip
+  repo: nur
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
