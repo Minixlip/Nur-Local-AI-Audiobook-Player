@@ -44,10 +44,25 @@ def resolve_resource_path(filename: str) -> str:
     if os.path.isabs(filename):
         return filename
     if getattr(sys, "frozen", False):
-        base_dir = os.path.dirname(sys.executable)
+        executable_dir = os.path.dirname(sys.executable)
+        candidates = [
+            os.path.join(executable_dir, filename),
+            os.path.join(os.path.dirname(executable_dir), filename),
+            os.path.join(os.getcwd(), filename),
+        ]
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_dir, filename)
+        candidates = [
+            os.path.join(base_dir, filename),
+            os.path.join(os.path.dirname(base_dir), filename),
+            os.path.join(os.getcwd(), filename),
+        ]
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    return candidates[0]
 
 
 warnings.filterwarnings("ignore", category=FutureWarning)

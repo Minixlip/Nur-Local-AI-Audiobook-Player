@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
+backend_dir = Path.cwd()
 datas = []
 binaries = []
 hiddenimports = []
@@ -29,6 +31,8 @@ for package_name in (
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
     hiddenimports += tmp_ret[2]
+
+datas += [(str(backend_dir / 'default_speaker.wav'), '.')]
 
 
 a = Analysis(

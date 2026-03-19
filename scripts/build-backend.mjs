@@ -9,6 +9,7 @@ const specPath = path.join(backendDir, 'nur_engine.spec')
 const distDir = path.join(backendDir, 'dist', 'nur_engine')
 const buildWorkDir = path.join(backendDir, 'build')
 const syncedBackendDir = path.join(backendDir, 'nur_engine')
+const defaultSpeakerPath = path.join(backendDir, 'default_speaker.wav')
 const platform = process.platform
 const arch = process.arch
 
@@ -246,6 +247,13 @@ if (!fs.existsSync(expectedBinaryPath) && fs.existsSync(builtBinaryPath)) {
 
 if (!fs.existsSync(expectedBinaryPath)) {
   fail(`Backend build completed but expected binary is missing: ${expectedBinaryPath}`)
+}
+
+if (fs.existsSync(defaultSpeakerPath)) {
+  fs.copyFileSync(defaultSpeakerPath, path.join(distDir, 'default_speaker.wav'))
+  log(`Bundled default speaker into backend build: ${path.join(distDir, 'default_speaker.wav')}`)
+} else {
+  log(`Default speaker file not found at ${defaultSpeakerPath}`)
 }
 
 writeBuildMeta(pythonVersion)
