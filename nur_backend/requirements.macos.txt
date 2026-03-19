@@ -1,0 +1,4 @@
+# macOS release builds use the standard host wheels so XTTS can run on CPU or Apple MPS.
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1

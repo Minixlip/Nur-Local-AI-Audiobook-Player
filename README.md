@@ -51,12 +51,21 @@ npm run dev
 # Windows
 npm run build:win
 
-# macOS
+# macOS (run this on a real Mac; it builds a host-arch backend first, so Apple Silicon produces arm64 and Intel produces x64)
 npm run build:mac
 
 # Linux
 npm run build:linux
 ```
+
+For notarized macOS builds, provide either `APPLE_NOTARY_KEYCHAIN_PROFILE` or all of
+`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` before running `npm run build:mac`.
+
+### Backend Packaging Notes
+
+- The Python TTS backend must be built on the same host platform you want to ship.
+- `npm run build:mac` now prepares a Mac-native `nur_engine` bundle before Electron packaging.
+- Windows uses the CUDA backend requirements; macOS uses standard PyTorch wheels for CPU/MPS.
 
 ## Repository Structure
 

@@ -75,9 +75,9 @@ xtts_status = {
 XTTS_SAMPLE_RATE = 24000
 XTTS_LATENT_CACHE_VERSION = "xtts_v2"
 XTTS_SILENCE_THRESHOLD = 350
-XTTS_SILENCE_PAD_MS = 40
+XTTS_SILENCE_PAD_MS = 55
 XTTS_STUDIO_SILENCE_THRESHOLD = 220
-XTTS_STUDIO_SILENCE_PAD_MS = 70
+XTTS_STUDIO_SILENCE_PAD_MS = 95
 XTTS_STREAM_CHUNK_SIZE = 12
 XTTS_STREAM_OVERLAP_SAMPLES = 1024
 
@@ -583,43 +583,17 @@ def generate_speech(request: SpeakRequest):
             if not os.path.exists(speaker_path):
                 raise HTTPException(status_code=500, detail=f"Missing speaker wav: {speaker_path}")
 
-            speaker_latents = load_cached_speaker_embedding(speaker_path)
-
             with gpu_lock:
                 if request.session_id != state.active_session_id:
                     raise HTTPException(status_code=499, detail="Request cancelled")
 
-                runtime_model = get_xtts_runtime_model()
-                if runtime_model is None:
-                    raise HTTPException(status_code=409, detail="XTTS is not ready yet")
-
-                if speaker_latents is None:
-                    speaker_latents = get_speaker_embedding(speaker_path)
-
                 with torch.inference_mode():
-                    if (
-                        isinstance(speaker_latents, tuple)
-                        and len(speaker_latents) == 2
-                        and speaker_latents[0] is not None
-                        and speaker_latents[1] is not None
-                        and hasattr(runtime_model, "inference")
-                    ):
-                        xtts_out = runtime_model.inference(
-                            text=request.text,
-                            language=request.language,
-                            gpt_cond_latent=speaker_latents[0],
-                            speaker_embedding=speaker_latents[1],
-                            speed=request.speed,
-                            enable_text_splitting=True,
-                        )
-                    else:
-                        xtts_out = runtime_model.full_inference(
-                            text=request.text,
-                            ref_audio_path=speaker_path,
-                            language=request.language,
-                            speed=request.speed,
-                            enable_text_splitting=True,
-                        )
+                    xtts_out = xtts_model.tts(
+                        text=request.text,
+                        speaker_wav=speaker_path,
+                        language=request.language,
+                        speed=request.speed,
+                    )
                 if device == "cuda":
                     torch.cuda.synchronize()
                 wav_out = xtts_out["wav"] if isinstance(xtts_out, dict) else xtts_out

@@ -22,14 +22,16 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
+    "backend:build": "node scripts/build-backend.mjs",
     "backend:sync": "node scripts/sync-backend.mjs",
+    "backend:prepare": "npm run backend:build && npm run backend:sync",
     "release:check": "node scripts/release-check.mjs",
     "smoke:packaged": "node scripts/smoke-release.mjs",
     "smoke:release": "npm run build:unpack && npm run smoke:packaged",
-    "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:unpack": "npm run build && npm run backend:prepare && electron-builder --dir",
+    "build:win": "npm run build && npm run backend:prepare && electron-builder --win",
+    "build:mac": "npm run build && npm run backend:prepare && node scripts/build-mac.mjs",
+    "build:linux": "npm run build && npm run backend:prepare && electron-builder --linux"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -51,6 +53,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.1.1",
+    "@electron/notarize": "^3.1.0",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",

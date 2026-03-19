@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, Tray, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -28,6 +28,8 @@ import type { RuntimeStatusSnapshot } from '../shared/runtime'
 
 let currentPlayer: ChildProcess | null = null
 let backendProcess: ChildProcess | null = null
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 
 installFileLogger()
 
@@ -38,6 +40,8 @@ const PIPER_FILENAME = 'en_US-lessac-medium.onnx'
 const PIPER_JSON = 'en_US-lessac-medium.onnx.json'
 const BACKEND_HOST = '127.0.0.1'
 const BACKEND_PORT = 8000
+const APP_NAME = 'Nur'
+const WINDOW_TITLE = 'NUR'
 const APP_ID = 'com.minixlip.nur'
 const REPOSITORY_URL = 'https://github.com/Minixlip/nur'
 const isSmokeTest = process.argv.includes('--smoke-test') || process.env.NUR_SMOKE_TEST === '1'
@@ -176,7 +180,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const getRuntimeStatus = (): RuntimeStatusSnapshot => ({
   diagnostics: {
-    appName: 'Nur',
+    appName: APP_NAME,
     appVersion: app.getVersion(),
     platform: process.platform,
     packaged: app.isPackaged,
@@ -390,57 +394,184 @@ const ensurePiperDownloaded = async (): Promise<boolean> => {
   return piperDownloadPromise
 }
 
+const getWindowIcon = () => nativeImage.createFromPath(icon)
+
+const getTrayIcon = () => {
+  const trayImage = nativeImage.createFromPath(icon)
+
+  if (process.platform === 'win32') {
+    return trayImage.resize({ width: 16, height: 16 })
+  }
+
+  if (process.platform === 'linux') {
+    return trayImage.resize({ width: 22, height: 22 })
+  }
+
+  return trayImage
+}
+
+const hideMainWindowToTray = () => {
+  if (process.platform === 'darwin') return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.setSkipTaskbar(true)
+  mainWindow.hide()
+}
+
+const showMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+
+  mainWindow.setSkipTaskbar(false)
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+const updateTrayMenu = () => {
+  if (!tray) return
+
+  const isVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible())
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: isVisible ? 'Hide Nur' : 'Open Nur',
+        click: () => {
+          if (isVisible) {
+            hideMainWindowToTray()
+            return
+          }
+          showMainWindow()
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          app.quit()
+        }
+      }
+    ])
+  )
+}
+
+const createTray = () => {
+  if (process.platform === 'darwin') return
+  if (tray) return
+
+  tray = new Tray(getTrayIcon())
+  tray.setToolTip(APP_NAME)
+  tray.on('click', () => showMainWindow())
+  tray.on('double-click', () => showMainWindow())
+  updateTrayMenu()
+}
+
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 900,
     height: 670,
     minWidth: 900,
     minHeight: 670,
-    minimizable: false,
+    title: WINDOW_TITLE,
+    icon: getWindowIcon(),
+    minimizable: true,
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       webSecurity: true
     }
   })
+  mainWindow = window
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  window.on('ready-to-show', () => {
+    window.show()
+    updateTrayMenu()
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.on('page-title-updated', (event) => {
+    event.preventDefault()
+    window.setTitle(WINDOW_TITLE)
+  })
+
+  window.on('minimize' as any, (event) => {
+    if (process.platform === 'darwin') return
+    event.preventDefault()
+    hideMainWindowToTray()
+  })
+
+  window.on('show', () => {
+    window.setSkipTaskbar(false)
+    updateTrayMenu()
+  })
+
+  window.on('hide', () => {
+    updateTrayMenu()
+  })
+
+  window.on('closed', () => {
+    mainWindow = null
+    updateTrayMenu()
+  })
+
+  window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    window.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
 const getBackendExecutablePath = () => {
-  const candidates: string[] = []
-  if (app.isPackaged) {
-    candidates.push(path.join(process.resourcesPath, 'nur_backend', 'nur_engine', 'nur_engine.exe'))
-    candidates.push(path.join(process.resourcesPath, 'nur_backend', 'nur_engine', 'nur_engine'))
-    candidates.push(path.join(process.resourcesPath, 'nur_backend', 'nur_engine.exe'))
-    candidates.push(path.join(process.resourcesPath, 'nur_backend', 'nur_engine'))
-    candidates.push(path.join(process.resourcesPath, 'nur_engine.exe'))
-    candidates.push(path.join(process.resourcesPath, 'nur_engine'))
-  } else {
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'dist', 'nur_engine', 'nur_engine.exe'))
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'dist', 'nur_engine', 'nur_engine'))
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'nur_engine', 'nur_engine.exe'))
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'nur_engine', 'nur_engine'))
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'nur_engine.exe'))
-    candidates.push(path.join(app.getAppPath(), 'nur_backend', 'nur_engine'))
+  const preferWindowsBinary = process.platform === 'win32'
+  const binaryNames = preferWindowsBinary
+    ? ['nur_engine.exe', 'nur_engine']
+    : ['nur_engine', 'nur_engine.exe']
+
+  const baseDirs = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, 'nur_backend', 'nur_engine'),
+        path.join(process.resourcesPath, 'nur_backend'),
+        process.resourcesPath
+      ]
+    : [
+        path.join(app.getAppPath(), 'nur_backend', 'dist', 'nur_engine'),
+        path.join(app.getAppPath(), 'nur_backend', 'nur_engine'),
+        path.join(app.getAppPath(), 'nur_backend')
+      ]
+
+  const candidates = baseDirs.flatMap((baseDir) =>
+    binaryNames.map((binaryName) => path.join(baseDir, binaryName))
+  )
+
+  const resolved =
+    candidates.find((candidate) => {
+      if (!fs.existsSync(candidate)) return false
+      if (process.platform !== 'win32' && candidate.endsWith('.exe')) return false
+      return true
+    }) || null
+
+  if (!resolved) {
+    const incompatible = candidates.find(
+      (candidate) => fs.existsSync(candidate) && process.platform !== 'win32' && candidate.endsWith('.exe')
+    )
+    if (incompatible) {
+      console.error(
+        `[Main] Found an incompatible Windows backend in a ${process.platform} build: ${incompatible}`
+      )
+    }
   }
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null
+
+  return resolved
 }
 
 const startBackend = () => {
@@ -460,7 +591,8 @@ const startBackend = () => {
     return
   }
 
-  const child = execFile(backendPath, [], { windowsHide: true })
+  console.log(`[Main] Launching Nur engine for ${process.platform}: ${backendPath}`)
+  const child = execFile(backendPath, [], process.platform === 'win32' ? { windowsHide: true } : {})
   backendProcess = child
 
   child.once('spawn', () => {
@@ -857,6 +989,7 @@ ipcMain.handle('voice:remove', async (_event, { id }) => {
 })
 
 app.whenReady().then(() => {
+  app.setName(APP_NAME)
   electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -873,13 +1006,18 @@ app.whenReady().then(() => {
 
   void ensurePiperDownloaded()
   createWindow()
+  createTray()
   if (app.isPackaged) {
     setTimeout(() => {
       void checkForUpdates()
     }, 12000)
   }
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      return
+    }
+    showMainWindow()
   })
 })
 
@@ -891,5 +1029,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  tray?.destroy()
+  tray = null
   stopBackend()
 })

@@ -1,0 +1,6 @@
+--index-url https://download.pytorch.org/whl/cpu
+
+# Linux release builds default to CPU wheels unless you intentionally rebuild for CUDA.
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1

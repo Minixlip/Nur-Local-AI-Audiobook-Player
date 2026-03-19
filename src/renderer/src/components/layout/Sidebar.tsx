@@ -32,19 +32,26 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
   const { library } = useLibrary()
 
   const isLibraryActive = location.pathname === '/' || location.pathname.startsWith('/read/')
+  const railPadding = collapsed ? 'p-3' : 'p-5'
 
   return (
     <aside
-      className={`relative flex-shrink-0 overflow-hidden border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] backdrop-blur-2xl flex flex-col p-5 gap-6 z-20 transition-[width] duration-300 ${
-        collapsed ? 'w-20' : 'w-[19rem]'
-      }`}
-      aria-label="Sidebar"
+      className={`relative flex-shrink-0 overflow-hidden border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] backdrop-blur-2xl flex flex-col gap-6 z-20 transition-[width,padding] duration-300 ${
+        collapsed ? 'w-24' : 'w-[19rem]'
+      } ${railPadding}`}
+      aria-label={collapsed ? 'Collapsed sidebar' : 'Sidebar'}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_35%)]" />
 
-      <div className={`relative z-10 flex items-center justify-between ${collapsed ? 'px-1' : 'px-1'}`}>
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] text-[11px] font-semibold tracking-[0.25em] text-white shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
+      <div
+        className={`relative z-10 ${collapsed ? 'flex flex-col items-center gap-3' : 'flex items-center justify-between px-1'}`}
+      >
+        <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
+          <div
+            className={`flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] font-semibold tracking-[0.25em] text-white shadow-[0_12px_30px_rgba(0,0,0,0.18)] ${
+              collapsed ? 'h-10 w-10 text-sm' : 'h-9 w-9 text-[11px]'
+            }`}
+          >
             N
           </div>
           {!collapsed && (
@@ -58,17 +65,19 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
         <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
           <button
             onClick={onToggleCollapse}
-            className={`flex items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-200 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${
-              collapsed ? 'h-8 w-8' : 'h-9 w-9'
+            className={`flex items-center justify-center rounded-full border text-zinc-100 shadow-[0_12px_26px_rgba(0,0,0,0.22)] transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
+              collapsed
+                ? 'h-10 w-10 border-white/15 bg-white/[0.09]'
+                : 'h-9 w-9 border-white/10 bg-white/5'
             }`}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
+            {collapsed ? <FiChevronRight className="text-base" /> : <FiChevronLeft />}
           </button>
         </Tooltip>
       </div>
 
-      <nav className="relative z-10 mt-1 flex flex-col gap-2 flex-none">
+      <nav className={`relative z-10 mt-1 flex flex-col gap-2 flex-none ${collapsed ? 'items-center' : ''}`}>
         {navItems.map((item) => {
           const isActive =
             item.path === '/' ? isLibraryActive : location.pathname.startsWith(item.path)
@@ -85,7 +94,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
 
           if (item.path === '/') {
             return (
-              <Tooltip key={item.path} label={item.label} className="w-full">
+              <Tooltip key={item.path} label={item.label} className={collapsed ? '' : 'w-full'}>
                 <button
                   onClick={() => navigate('/')}
                   className={navClass(isActive, collapsed)}
@@ -102,7 +111,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
           }
 
           return (
-            <Tooltip key={item.path} label={item.label} className="w-full">
+            <Tooltip key={item.path} label={item.label} className={collapsed ? '' : 'w-full'}>
               <NavLink to={item.path} className={() => navClass(isActive, collapsed)} aria-label={item.label}>
                 {content}
                 {!collapsed && (

@@ -21,6 +21,7 @@ interface AudioBatch {
   text: string
   sentences: string[]
   globalIndices: number[]
+  endsParagraph: boolean
 }
 
 interface HighlightTrigger {
@@ -56,7 +57,8 @@ const AUDIO_CACHE_DISK_LIMIT = 120
 const ENABLE_PREWARM = false
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TTS_SPEED_STORAGE_KEY = 'tts_playback_speed'
-const XTTS_QUALITY_STORAGE_KEY = 'xtts_quality_mode'
+const XTTS_QUALITY_STORAGE_KEY = 'tts_quality_mode'
+const LEGACY_XTTS_QUALITY_STORAGE_KEY = 'xtts_quality_mode'
 const DEFAULT_TTS_SPEED = 1.0
 const MIN_TTS_SPEED = 0.85
 const MAX_TTS_SPEED = 1.15
@@ -67,6 +69,13 @@ const XTTS_STUDIO_FIRST_BATCH_WORDS = 18
 const XTTS_STUDIO_BATCH_RAMP = [XTTS_STUDIO_FIRST_BATCH_WORDS, 28, 38]
 const XTTS_STUDIO_BATCH_SIZE_STANDARD = 64
 const XTTS_STUDIO_MAX_TTS_CHARS = 320
+const XTTS_BUFFERED_FADE_SEC = 0.012
+const XTTS_BATCH_JOIN_GAP_SEC = 0.02
+const XTTS_MAJOR_PUNCTUATION_PAUSE_SEC = 0.03
+const XTTS_MINOR_PUNCTUATION_PAUSE_SEC = 0.014
+const XTTS_PARAGRAPH_PAUSE_SEC = 0.04
+const XTTS_DIALOGUE_ENTRY_PAUSE_SEC = 0.012
+const XTTS_MAX_BATCH_JOIN_GAP_SEC = 0.12
 const STREAM_INITIAL_PCM_BYTES = 4096
 const STREAM_STEADY_PCM_BYTES = 16384
 const STREAM_CHUNK_FADE_SEC = 0.008
@@ -159,6 +168,38 @@ const concatUint8Arrays = (left: Uint8Array, right: Uint8Array) => {
   return combined
 }
 
+const countWords = (text: string) => Math.max(1, text.trim().split(/\s+/).filter(Boolean).length)
+
+const isMajorPauseEnding = (text: string) => /[.!?]["')\]}]*$/.test(text.trim())
+
+const isMinorPauseEnding = (text: string) => /[,;:]["')\]}]*$/.test(text.trim())
+
+const startsDialogueLike = (text: string) => /^[\s"'“‘—-]/.test(text.trim())
+
+const getXttsJoinGapForBatch = (batch: AudioBatch, nextBatch?: AudioBatch | null) => {
+  if (!batch.sentences.length) return 0
+
+  const lastSentence = batch.sentences[batch.sentences.length - 1] || ''
+  const firstNextSentence = nextBatch?.sentences?.[0] || ''
+  let gap = XTTS_BATCH_JOIN_GAP_SEC
+
+  if (isMajorPauseEnding(lastSentence)) {
+    gap += XTTS_MAJOR_PUNCTUATION_PAUSE_SEC
+  } else if (isMinorPauseEnding(lastSentence)) {
+    gap += XTTS_MINOR_PUNCTUATION_PAUSE_SEC
+  }
+
+  if (batch.endsParagraph) {
+    gap += XTTS_PARAGRAPH_PAUSE_SEC
+  }
+
+  if (startsDialogueLike(firstNextSentence)) {
+    gap += XTTS_DIALOGUE_ENTRY_PAUSE_SEC
+  }
+
+  return Math.min(XTTS_MAX_BATCH_JOIN_GAP_SEC, gap)
+}
+
 const createPcmAudioBuffer = (ctx: AudioContext, pcmBytes: Uint8Array, sampleRate: number) => {
   const int16 = new Int16Array(
     pcmBytes.buffer.slice(pcmBytes.byteOffset, pcmBytes.byteOffset + pcmBytes.byteLength)
@@ -182,7 +223,18 @@ const getStoredTtsSpeed = () => {
 
 const getStoredXttsQualityMode = (): XttsQualityMode => {
   const stored = localStorage.getItem(XTTS_QUALITY_STORAGE_KEY)
-  return stored === 'balanced' ? 'balanced' : 'studio'
+  if (stored === 'balanced' || stored === 'studio') {
+    return stored
+  }
+
+  const legacy = localStorage.getItem(LEGACY_XTTS_QUALITY_STORAGE_KEY)
+  if (legacy === 'balanced' || legacy === 'studio') {
+    localStorage.setItem(XTTS_QUALITY_STORAGE_KEY, legacy)
+    localStorage.removeItem(LEGACY_XTTS_QUALITY_STORAGE_KEY)
+    return legacy
+  }
+
+  return 'studio'
 }
 
 const getBatchRampForEngine = (engine: string, lowEndMode: boolean, xttsQuality: XttsQualityMode) => {
@@ -221,8 +273,7 @@ const getMaxTtsCharsForEngine = (
   return lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
 }
 
-const shouldStreamXttsFirstBatch = (lowEndMode: boolean, xttsQuality: XttsQualityMode) =>
-  lowEndMode || xttsQuality !== 'studio'
+const shouldStreamXttsFirstBatch = (_lowEndMode: boolean, _xttsQuality: XttsQualityMode) => false
 
 export function useAudioPlayer({
   bookStructure,
@@ -275,13 +326,19 @@ export function useAudioPlayer({
     activeSourcesRef.current.clear()
   }
 
-  const scheduleAudioBuffer = (ctx: AudioContext, audioBuffer: AudioBuffer, fadeSec: number) => {
+  const scheduleAudioBuffer = (
+    ctx: AudioContext,
+    audioBuffer: AudioBuffer,
+    fadeSec: number,
+    options?: { joinGapSec?: number }
+  ) => {
     const source = ctx.createBufferSource()
     source.buffer = audioBuffer
 
     const start = Math.max(ctx.currentTime, nextStartTimeRef.current)
     const gainNode = ctx.createGain()
     const safeFadeSec = Math.min(fadeSec, audioBuffer.duration * 0.25)
+    const joinGapSec = Math.max(0, options?.joinGapSec ?? 0)
 
     if (safeFadeSec > 0) {
       gainNode.gain.setValueAtTime(0, start)
@@ -308,7 +365,7 @@ export function useAudioPlayer({
     source.start(start)
     const overlap = Math.min(safeFadeSec, audioBuffer.duration * 0.25)
     const endTime = start + audioBuffer.duration
-    nextStartTimeRef.current = Math.max(start + 0.02, endTime - overlap)
+    nextStartTimeRef.current = Math.max(start + 0.02, endTime - overlap + joinGapSec)
     playbackEndTimeRef.current = endTime
 
     return { start, endTime }
@@ -379,36 +436,43 @@ export function useAudioPlayer({
     maxTtsChars: number
   ) => {
     const batches: AudioBatch[] = []
-    const orderedIndices: number[] = []
     const pages = bookStructure.pagesStructure
+
+    const paragraphUnits: Array<{
+      type: 'paragraph' | 'image'
+      sentences: string[]
+      globalIndices: number[]
+    }> = []
 
     if (pages && pages[startPageIndex]) {
       for (let pageIdx = startPageIndex; pageIdx < pages.length; pageIdx++) {
         const blocks = pages[pageIdx] || []
         for (const block of blocks) {
           if (block.type === 'image') {
-            orderedIndices.push(block.startIndex)
-          } else {
-            for (let i = 0; i < block.content.length; i++) {
-              orderedIndices.push(block.startIndex + i)
-            }
+            paragraphUnits.push({
+              type: 'image',
+              sentences: [block.content[0]],
+              globalIndices: [block.startIndex]
+            })
+            continue
           }
+
+          paragraphUnits.push({
+            type: 'paragraph',
+            sentences: [...block.content],
+            globalIndices: block.content.map((_, idx) => block.startIndex + idx)
+          })
         }
       }
+    } else {
+      const safeStartIndex = bookStructure.sentenceToPageMap.findIndex((p) => p === startPageIndex)
+      const startIndex = Math.max(0, safeStartIndex)
+      paragraphUnits.push({
+        type: 'paragraph',
+        sentences: bookStructure.allSentences.slice(startIndex),
+        globalIndices: bookStructure.allSentences.map((_, idx) => idx).slice(startIndex)
+      })
     }
-
-    const safeStartIndex =
-      orderedIndices.length > 0
-        ? orderedIndices[0]
-        : bookStructure.sentenceToPageMap.findIndex((p) => p === startPageIndex)
-
-    const activeIndices =
-      orderedIndices.length > 0
-        ? orderedIndices
-        : bookStructure.allSentences.map((_, idx) => idx).slice(Math.max(0, safeStartIndex))
-
-    const activeSentences = activeIndices.map((idx) => bookStructure.allSentences[idx])
-    const getGlobalIndex = (localIndex: number) => activeIndices[localIndex]
 
     let currentBatchText: string[] = []
     let currentBatchIndices: number[] = []
@@ -416,57 +480,136 @@ export function useAudioPlayer({
     let currentCharCount = 0
     let batchIndex = 0
 
-    for (let i = 0; i < activeSentences.length; i++) {
-      const text = activeSentences[i]
-      const globalIdx = getGlobalIndex(i)
-
-      if (text.includes('[[[IMG_MARKER')) {
-        if (currentBatchText.length > 0) {
-          batches.push({
-            text: currentBatchText.join(' '),
-            sentences: [...currentBatchText],
-            globalIndices: [...currentBatchIndices]
-          })
-          currentBatchText = []
-          currentBatchIndices = []
-          currentWordCount = 0
-          currentCharCount = 0
-          batchIndex++
-        }
-        batches.push({ text: '[[[IMAGE]]]', sentences: [text], globalIndices: [globalIdx] })
-        continue
-      }
-
-      const wordCount = text.split(/\s+/).length
-      const nextCharCount = currentCharCount + (currentCharCount > 0 ? 1 : 0) + text.length
-      currentBatchText.push(text)
-      currentBatchIndices.push(globalIdx)
-      currentWordCount += wordCount
-
-      const targetSize =
-        batchIndex < batchRamp.length ? batchRamp[batchIndex] : batchSizeStandard
-
-      if (currentWordCount >= targetSize || nextCharCount > maxTtsChars) {
-        batches.push({
-          text: currentBatchText.join(' '),
-          sentences: [...currentBatchText],
-          globalIndices: [...currentBatchIndices]
-        })
-        currentBatchText = []
-        currentBatchIndices = []
-        currentWordCount = 0
-        currentCharCount = 0
-        batchIndex++
-      }
-      currentCharCount = nextCharCount
-    }
-    if (currentBatchText.length > 0) {
+    const pushBatch = (endsParagraph: boolean) => {
+      if (currentBatchText.length === 0) return
       batches.push({
         text: currentBatchText.join(' '),
         sentences: [...currentBatchText],
-        globalIndices: [...currentBatchIndices]
+        globalIndices: [...currentBatchIndices],
+        endsParagraph
+      })
+      currentBatchText = []
+      currentBatchIndices = []
+      currentWordCount = 0
+      currentCharCount = 0
+      batchIndex++
+    }
+
+    const addSentencesToBatch = (sentences: string[], indices: number[]) => {
+      sentences.forEach((sentence, idx) => {
+        currentBatchText.push(sentence)
+        currentBatchIndices.push(indices[idx])
+        currentWordCount += countWords(sentence)
+        currentCharCount += (currentCharCount > 0 ? 1 : 0) + sentence.length
       })
     }
+
+    const splitParagraphIntoChunks = (
+      sentences: string[],
+      indices: number[],
+      targetSize: number,
+      maxChars: number
+    ) => {
+      const chunks: Array<{ sentences: string[]; indices: number[]; endsParagraph: boolean }> = []
+      let chunkSentences: string[] = []
+      let chunkIndices: number[] = []
+      let chunkWordCount = 0
+      let chunkCharCount = 0
+
+      const flushChunk = (endsParagraph: boolean) => {
+        if (!chunkSentences.length) return
+        chunks.push({
+          sentences: [...chunkSentences],
+          indices: [...chunkIndices],
+          endsParagraph
+        })
+        chunkSentences = []
+        chunkIndices = []
+        chunkWordCount = 0
+        chunkCharCount = 0
+      }
+
+      sentences.forEach((sentence, idx) => {
+        const sentenceWordCount = countWords(sentence)
+        const nextCharCount = chunkCharCount + (chunkCharCount > 0 ? 1 : 0) + sentence.length
+
+        if (
+          chunkSentences.length > 0 &&
+          (nextCharCount > maxChars || chunkWordCount + sentenceWordCount > Math.round(targetSize * 1.35))
+        ) {
+          flushChunk(false)
+        }
+
+        chunkSentences.push(sentence)
+        chunkIndices.push(indices[idx])
+        chunkWordCount += sentenceWordCount
+        chunkCharCount += (chunkCharCount > 0 ? 1 : 0) + sentence.length
+
+        const reachedTarget = chunkWordCount >= targetSize || chunkCharCount >= Math.round(maxChars * 0.92)
+        if (reachedTarget && isMajorPauseEnding(sentence) && idx < sentences.length - 1) {
+          flushChunk(false)
+        }
+      })
+
+      flushChunk(true)
+      return chunks
+    }
+
+    for (const unit of paragraphUnits) {
+      if (unit.type === 'image') {
+        pushBatch(true)
+        batches.push({
+          text: '[[[IMAGE]]]',
+          sentences: [...unit.sentences],
+          globalIndices: [...unit.globalIndices],
+          endsParagraph: true
+        })
+        continue
+      }
+
+      const targetSize =
+        batchIndex < batchRamp.length ? batchRamp[batchIndex] : batchSizeStandard
+      const paragraphText = unit.sentences.join(' ')
+      const paragraphWordCount = unit.sentences.reduce((sum, sentence) => sum + countWords(sentence), 0)
+      const paragraphCharCount = paragraphText.length
+      const softWordLimit = Math.round(targetSize * 1.25)
+      const softCharLimit = Math.round(maxTtsChars * 1.12)
+
+      if (
+        currentBatchText.length === 0 &&
+        (paragraphWordCount > softWordLimit || paragraphCharCount > maxTtsChars)
+      ) {
+        const chunks = splitParagraphIntoChunks(
+          unit.sentences,
+          unit.globalIndices,
+          targetSize,
+          maxTtsChars
+        )
+        chunks.forEach((chunk) => {
+          currentBatchText = [...chunk.sentences]
+          currentBatchIndices = [...chunk.indices]
+          currentWordCount = chunk.sentences.reduce((sum, sentence) => sum + countWords(sentence), 0)
+          currentCharCount = chunk.sentences.join(' ').length
+          pushBatch(chunk.endsParagraph)
+        })
+        continue
+      }
+
+      const projectedWordCount = currentWordCount + paragraphWordCount
+      const projectedCharCount =
+        currentCharCount + (currentCharCount > 0 ? 1 : 0) + paragraphCharCount
+      const shouldFlushBeforeAdding =
+        currentBatchText.length > 0 &&
+        (projectedCharCount > softCharLimit || projectedWordCount > softWordLimit)
+
+      if (shouldFlushBeforeAdding) {
+        pushBatch(true)
+      }
+
+      addSentencesToBatch(unit.sentences, unit.globalIndices)
+    }
+
+    pushBatch(true)
 
     return batches
   }
@@ -648,6 +791,7 @@ export function useAudioPlayer({
     const fadeSec = Number.isFinite(storedCrossfadeMs)
       ? Math.min(MAX_CROSSFADE_SEC, Math.max(0, storedCrossfadeMs / 1000))
       : DEFAULT_CROSSFADE_SEC
+    const bufferedFadeSec = engine === 'xtts' ? Math.min(fadeSec, XTTS_BUFFERED_FADE_SEC) : fadeSec
 
     const batches = buildBatches(visualPageIndex, batchRamp, batchSizeStandard, maxTtsChars)
 
@@ -937,7 +1081,11 @@ export function useAudioPlayer({
             }
             if (!audioBuffer) continue
 
-            const { start } = scheduleAudioBuffer(ctx, audioBuffer, fadeSec)
+            const nextBatch = i + 1 < batches.length ? batches[i + 1] : null
+            const joinGapSec =
+              engine === 'xtts' ? getXttsJoinGapForBatch(batch, nextBatch) : 0
+
+            const { start } = scheduleAudioBuffer(ctx, audioBuffer, bufferedFadeSec, { joinGapSec })
             markPlaybackStarted()
 
             const durations = estimateSentenceDurations(batch.sentences, audioBuffer.duration)

@@ -9,6 +9,8 @@ const candidateExecutables = [
   path.join(rootDir, 'dist', 'win-unpacked', 'Nur.exe'),
   path.join(rootDir, 'dist', 'win-unpacked', 'nur.exe'),
   path.join(rootDir, 'dist', 'mac', 'Nur.app', 'Contents', 'MacOS', 'Nur'),
+  path.join(rootDir, 'dist', 'mac-arm64', 'Nur.app', 'Contents', 'MacOS', 'Nur'),
+  path.join(rootDir, 'dist', 'mac-x64', 'Nur.app', 'Contents', 'MacOS', 'Nur'),
   path.join(rootDir, 'dist', 'linux-unpacked', 'nur')
 ]
 

@@ -70,30 +70,72 @@ function AppFrame({
       ? { title: 'Reader', description: 'Continue reading with synced playback.' }
       : routeMeta['/'])
   const isReaderRoute = location.pathname.startsWith('/read/')
+  const hasBackendIssue = !backendOk && backendState === 'error'
+  const hasModelIssue = selectedModelState === 'error'
+  const isPreparingPiper = engine === 'piper' && selectedModelState === 'downloading'
+  const showPiperShortcut = engine === 'xtts' && backendOk
+  const showOpenSettings = hasBackendIssue || hasModelIssue
+  const showRetryAction = hasBackendIssue || hasModelIssue
+  const showRevealLogs = hasBackendIssue
+  const showDevVersion = !packaged
+  const diagnosticMessage = hasBackendIssue
+    ? backendMessage || statusMessage || 'Nur could not start the local speech engine.'
+    : hasModelIssue
+      ? selectedModelMessage || 'The selected voice model could not be prepared.'
+      : null
+
+  const overlayTitle = () => {
+    if (hasBackendIssue) {
+      return 'Engine needs attention'
+    }
+    if (!backendOk) {
+      return 'Starting Nur'
+    }
+    if (engine === 'piper') {
+      return hasModelIssue ? 'Voice setup failed' : 'Getting your voice ready'
+    }
+    return hasModelIssue ? 'XTTS needs attention' : 'Preparing XTTS'
+  }
 
   const overlayHint = () => {
+    if (hasBackendIssue) {
+      return 'Nur could not finish starting the local speech engine.'
+    }
+
     if (!backendOk) {
-      return statusMessage || 'Starting Nur engine...'
+      return 'Launching the local speech engine. This should only take a moment.'
     }
 
     if (engine === 'piper') {
-      if (selectedModelState === 'downloading') {
-        return `Downloading the default Piper voice... ${Math.round(progress ?? 0)}%`
+      if (isPreparingPiper) {
+        return 'Downloading the default voice for first use. This only happens once.'
       }
-      if (selectedModelState === 'error') {
-        return selectedModelMessage || 'The default Piper download failed.'
+      if (hasModelIssue) {
+        return 'The default voice could not be prepared.'
       }
-      return selectedModelMessage || 'Preparing the default Piper voice...'
+      return 'Preparing your default voice so the reader is ready right away.'
     }
 
-    if (selectedModelState === 'preparing' || selectedModelState === 'downloading') {
-      return selectedModelMessage || 'Preparing XTTS. This can take several minutes.'
+    if (hasModelIssue) {
+      return 'XTTS could not be prepared with the current setup.'
     }
-    if (selectedModelState === 'error') {
-      return selectedModelMessage || 'XTTS preparation failed.'
-    }
-    return selectedModelMessage || 'Preparing XTTS...'
+    return 'High-quality XTTS setup can take a few minutes on first launch.'
   }
+
+  const overlaySupportingCopy = () => {
+    if (hasBackendIssue || hasModelIssue) {
+      return null
+    }
+    if (!backendOk) {
+      return 'Nur will continue automatically as soon as the engine is ready.'
+    }
+    if (engine === 'xtts') {
+      return 'Need something faster? Switch to Piper and start reading immediately.'
+    }
+    return 'Nur will continue automatically as soon as setup finishes.'
+  }
+
+  const hasOverlayActions = showRetryAction || showRevealLogs || showOpenSettings || showPiperShortcut
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-[#08090c] text-zinc-100">
@@ -145,67 +187,83 @@ function AppFrame({
 
       {!backendReady && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/82 backdrop-blur-2xl">
-          <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.05] px-8 py-7 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-            <div
-              className={`mx-auto h-12 w-12 rounded-full border-2 ${
-                selectedModelState === 'error' || backendState === 'error'
-                  ? 'border-red-400/30 border-t-red-400'
-                  : 'border-white/20 border-t-emerald-300'
-              } animate-spin`}
-            />
-            <div className="mt-5 text-[11px] uppercase tracking-[0.35em] text-zinc-500">Nur</div>
-            <div className="mt-3 text-xl font-semibold text-zinc-50">
-              {engine === 'piper' ? 'Preparing your default voice' : 'Preparing XTTS'}
+          <div className="w-full max-w-[28rem] rounded-[2rem] border border-white/10 bg-[#17181d]/92 px-8 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]">
+              <div
+                className={`h-10 w-10 rounded-full border-2 ${
+                  hasBackendIssue || hasModelIssue
+                    ? 'border-red-400/25 border-t-red-400'
+                    : 'border-white/15 border-t-emerald-300'
+                } animate-spin`}
+              />
             </div>
-            <div className="mt-3 text-sm leading-6 text-zinc-400">{overlayHint()}</div>
-            {!backendOk && backendMessage && (
-              <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-left text-xs leading-5 text-amber-100">
-                {backendMessage}
+            <div className="mt-6 text-[10px] uppercase tracking-[0.42em] text-zinc-500">Nur</div>
+            <div className="mt-3 text-[1.85rem] font-semibold leading-none text-zinc-50">
+              {overlayTitle()}
+            </div>
+            <div className="mt-4 text-sm leading-6 text-zinc-400">{overlayHint()}</div>
+            {overlaySupportingCopy() && (
+              <div className="mt-2 text-sm leading-6 text-zinc-500">{overlaySupportingCopy()}</div>
+            )}
+            {diagnosticMessage && (
+              <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-xs leading-5 text-zinc-300">
+                {diagnosticMessage}
               </div>
             )}
-            {engine === 'piper' && selectedModelState === 'downloading' && (
-              <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/10">
+            {isPreparingPiper && (
+              <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
                   className="h-full rounded-full bg-emerald-300 transition-all duration-300"
                   style={{ width: `${progress ?? 0}%` }}
                 />
               </div>
             )}
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              {(selectedModelState === 'error' || !backendOk) && (
-                <button
-                  onClick={onRetry}
-                  className="rounded-full border border-white/10 bg-white px-4 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
-                >
-                  {backendOk ? 'Retry' : 'Restart Engine'}
-                </button>
-              )}
-              {!backendOk && (
-                <button
-                  onClick={onRevealLogs}
-                  className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
-                >
-                  Reveal Logs
-                </button>
-              )}
-              <Link
-                to="/settings"
-                className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
-              >
-                Open Settings
-              </Link>
-              {engine === 'xtts' && (
-                <button
-                  onClick={onUsePiper}
-                  className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
-                >
-                  Use Piper Instead
-                </button>
-              )}
-            </div>
-            <div className="mt-5 text-[11px] uppercase tracking-[0.2em] text-white/40">
-              v{appVersion} {packaged ? 'packaged' : 'dev'}
-            </div>
+            {hasOverlayActions && (
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+                {showRetryAction && (
+                  <button
+                    onClick={onRetry}
+                    className="rounded-full border border-white/10 bg-white px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200"
+                  >
+                    {hasBackendIssue ? 'Restart Engine' : 'Try Again'}
+                  </button>
+                )}
+                {showPiperShortcut && (
+                  <button
+                    onClick={onUsePiper}
+                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                  >
+                    Use Piper Instead
+                  </button>
+                )}
+                {showRevealLogs && (
+                  <button
+                    onClick={onRevealLogs}
+                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                  >
+                    Reveal Logs
+                  </button>
+                )}
+                {showOpenSettings && (
+                  <Link
+                    to="/settings"
+                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                  >
+                    Open Settings
+                  </Link>
+                )}
+              </div>
+            )}
+            {!diagnosticMessage && !isPreparingPiper && (
+              <div className="mt-6 text-xs tracking-[0.08em] text-zinc-500">
+                This screen closes automatically when setup finishes.
+              </div>
+            )}
+            {showDevVersion && (
+              <div className="mt-5 text-[11px] uppercase tracking-[0.2em] text-white/35">
+                v{appVersion} dev
+              </div>
+            )}
           </div>
         </div>
       )}
