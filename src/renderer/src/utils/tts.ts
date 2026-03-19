@@ -11,7 +11,7 @@ export const TTS_ENGINE_CHANGED_EVENT = 'tts:engine-changed'
 
 export const getStoredTtsEngine = (): TtsEngine => {
   const stored = localStorage.getItem('tts_engine')
-  return stored === 'xtts' ? 'xtts' : DEFAULT_TTS_ENGINE
+  return stored === 'xtts' || stored === 'chatterbox' ? 'chatterbox' : DEFAULT_TTS_ENGINE
 }
 
 export const ensureStoredTtsEngine = (): TtsEngine => {
@@ -36,7 +36,7 @@ export const setStoredPiperModelPath = (path: string | null) => {
 }
 
 export const getModelStatusForEngine = (status: TtsStatusSnapshot, engine: TtsEngine) =>
-  engine === 'xtts' ? status.xtts : status.piper
+  engine === 'chatterbox' ? status.chatterbox : status.piper
 
 export const isEngineReady = (status: TtsStatusSnapshot, engine: TtsEngine) =>
   status.backendOk && getModelStatusForEngine(status, engine).ready

@@ -13,6 +13,7 @@ const platform = process.platform
 const arch = process.arch
 
 const backendBinaryName = platform === 'win32' ? 'nur_engine.exe' : 'nur_engine'
+const builtBinaryPath = path.join(buildWorkDir, 'nur_engine', backendBinaryName)
 const expectedBinaryPath = path.join(distDir, backendBinaryName)
 const buildMetaPath = path.join(distDir, 'build-meta.json')
 const syncedBackendBinaryPath = path.join(syncedBackendDir, backendBinaryName)
@@ -114,12 +115,14 @@ const resolveSystemPython = () => {
   const candidates =
     platform === 'win32'
       ? [
+          { command: 'py', args: ['-3.11'] },
           { command: 'py', args: ['-3.10'] },
           { command: 'py', args: ['-3'] },
           { command: 'python', args: [] },
           { command: 'python3', args: [] }
         ]
       : [
+          { command: 'python3.11', args: [] },
           { command: 'python3.10', args: [] },
           { command: 'python3', args: [] },
           { command: 'python', args: [] }
@@ -183,7 +186,7 @@ if (
 const python = resolveSystemPython()
 if (!python) {
   fail(
-    'Python 3.10 is required to build the backend. Set NUR_BACKEND_PYTHON to a working interpreter.'
+    'Python 3.10 or 3.11 is required to build the backend. Set NUR_BACKEND_PYTHON to a working interpreter.'
   )
 }
 
@@ -193,16 +196,16 @@ const pythonVersion = capture(python.command, [
   'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
 ])
 
-if (!['3.8', '3.9', '3.10'].includes(pythonVersion)) {
+if (!['3.10', '3.11'].includes(pythonVersion)) {
   fail(
-    `Unsupported Python version ${pythonVersion}. The Coqui TTS backend currently needs Python 3.8, 3.9, or 3.10.`
+    `Unsupported Python version ${pythonVersion}. The Chatterbox + Piper backend currently supports Python 3.10 or 3.11.`
   )
 }
 
 if (platform === 'darwin') {
   log(`Preparing macOS backend for ${arch}.`)
   if (arch === 'x64') {
-    log('Intel macOS builds are less tested than Apple Silicon. Validate XTTS carefully on target hardware.')
+    log('Intel macOS builds are less tested than Apple Silicon. Validate Chatterbox carefully on target hardware.')
   }
 }
 
@@ -234,6 +237,12 @@ fs.rmSync(buildWorkDir, { recursive: true, force: true })
 
 log('Building backend executable with PyInstaller...')
 run(venvPython, ['-m', 'PyInstaller', '--noconfirm', 'nur_engine.spec'])
+
+if (!fs.existsSync(expectedBinaryPath) && fs.existsSync(builtBinaryPath)) {
+  log(`Restoring collected backend executable from build output: ${builtBinaryPath}`)
+  fs.mkdirSync(distDir, { recursive: true })
+  fs.copyFileSync(builtBinaryPath, expectedBinaryPath)
+}
 
 if (!fs.existsSync(expectedBinaryPath)) {
   fail(`Backend build completed but expected binary is missing: ${expectedBinaryPath}`)

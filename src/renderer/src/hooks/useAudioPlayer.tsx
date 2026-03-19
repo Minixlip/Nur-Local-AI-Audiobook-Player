@@ -34,6 +34,16 @@ interface CachedAudio {
   audio_data: Uint8Array | null
 }
 
+interface PlaybackBufferState {
+  active: boolean
+  engine: string | null
+  progress: number
+  readySeconds: number
+  targetSeconds: number
+  label: string
+  detail: string
+}
+
 type XttsQualityMode = 'balanced' | 'studio'
 
 // --- CONSTANTS ---
@@ -59,26 +69,48 @@ const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TTS_SPEED_STORAGE_KEY = 'tts_playback_speed'
 const XTTS_QUALITY_STORAGE_KEY = 'tts_quality_mode'
 const LEGACY_XTTS_QUALITY_STORAGE_KEY = 'xtts_quality_mode'
+const XTTS_AUDIO_CACHE_VERSION = 'chatterbox_audio_v1'
 const DEFAULT_TTS_SPEED = 1.0
 const MIN_TTS_SPEED = 0.85
 const MAX_TTS_SPEED = 1.15
 const STREAMED_PIPER_FIRST_BATCH_WORDS = 1
-const XTTS_FIRST_BATCH_WORDS = 1
-const XTTS_LOW_END_FIRST_BATCH_WORDS = 1
-const XTTS_STUDIO_FIRST_BATCH_WORDS = 18
-const XTTS_STUDIO_BATCH_RAMP = [XTTS_STUDIO_FIRST_BATCH_WORDS, 28, 38]
-const XTTS_STUDIO_BATCH_SIZE_STANDARD = 64
-const XTTS_STUDIO_MAX_TTS_CHARS = 320
-const XTTS_BUFFERED_FADE_SEC = 0.012
-const XTTS_BATCH_JOIN_GAP_SEC = 0.02
-const XTTS_MAJOR_PUNCTUATION_PAUSE_SEC = 0.03
-const XTTS_MINOR_PUNCTUATION_PAUSE_SEC = 0.014
-const XTTS_PARAGRAPH_PAUSE_SEC = 0.04
-const XTTS_DIALOGUE_ENTRY_PAUSE_SEC = 0.012
-const XTTS_MAX_BATCH_JOIN_GAP_SEC = 0.12
+const XTTS_FIRST_BATCH_WORDS = 18
+const XTTS_LOW_END_FIRST_BATCH_WORDS = 12
+const XTTS_STUDIO_FIRST_BATCH_WORDS = 36
+const XTTS_STUDIO_BATCH_RAMP = [XTTS_STUDIO_FIRST_BATCH_WORDS, 58, 78]
+const XTTS_STUDIO_BATCH_SIZE_STANDARD = 112
+const XTTS_STUDIO_MAX_TTS_CHARS = 940
+const XTTS_BUFFERED_FADE_SEC = 0
+const XTTS_BATCH_JOIN_GAP_SEC = 0.006
+const XTTS_MAJOR_PUNCTUATION_PAUSE_SEC = 0.012
+const XTTS_MINOR_PUNCTUATION_PAUSE_SEC = 0.004
+const XTTS_PARAGRAPH_PAUSE_SEC = 0.022
+const XTTS_DIALOGUE_ENTRY_PAUSE_SEC = 0.008
+const XTTS_MAX_BATCH_JOIN_GAP_SEC = 0.055
+const XTTS_BALANCED_INITIAL_BUFFER_SEC = 18
+const XTTS_BALANCED_STEADY_BUFFER_SEC = 28
+const XTTS_STUDIO_INITIAL_BUFFER_SEC = 28
+const XTTS_STUDIO_STEADY_BUFFER_SEC = 42
+const XTTS_LOW_END_INITIAL_BUFFER_SEC = 14
+const XTTS_LOW_END_STEADY_BUFFER_SEC = 22
+const XTTS_WORDS_PER_SECOND = 2.7
+const XTTS_ESTIMATED_MAJOR_PAUSE_SEC = 0.24
+const XTTS_ESTIMATED_MINOR_PAUSE_SEC = 0.08
+const XTTS_ESTIMATED_PARAGRAPH_PAUSE_SEC = 0.18
+const XTTS_MAX_BUFFERED_BATCHES = 8
+const IMAGE_PAUSE_SEC = 2.0
 const STREAM_INITIAL_PCM_BYTES = 4096
 const STREAM_STEADY_PCM_BYTES = 16384
 const STREAM_CHUNK_FADE_SEC = 0.008
+const EMPTY_BUFFER_STATE: PlaybackBufferState = {
+  active: false,
+  engine: null,
+  progress: 0,
+  readySeconds: 0,
+  targetSeconds: 0,
+  label: '',
+  detail: ''
+}
 
 // --- HELPER: Time Estimator ---
 const estimateSentenceDurations = (sentences: string[], totalDuration: number) => {
@@ -200,6 +232,22 @@ const getXttsJoinGapForBatch = (batch: AudioBatch, nextBatch?: AudioBatch | null
   return Math.min(XTTS_MAX_BATCH_JOIN_GAP_SEC, gap)
 }
 
+const estimateXttsBatchPlaybackSeconds = (batch: AudioBatch, playbackRate: number) => {
+  if (!batch.sentences.length) return 0
+
+  const wordCount = batch.sentences.reduce((sum, sentence) => sum + countWords(sentence), 0)
+  const majorPauseCount = batch.sentences.filter((sentence) => isMajorPauseEnding(sentence)).length
+  const minorPauseCount = batch.sentences.filter((sentence) => isMinorPauseEnding(sentence)).length
+
+  const estimatedDuration =
+    wordCount / XTTS_WORDS_PER_SECOND +
+    majorPauseCount * XTTS_ESTIMATED_MAJOR_PAUSE_SEC +
+    minorPauseCount * XTTS_ESTIMATED_MINOR_PAUSE_SEC +
+    (batch.endsParagraph ? XTTS_ESTIMATED_PARAGRAPH_PAUSE_SEC : 0)
+
+  return Math.max(2.2, estimatedDuration / Math.max(0.5, playbackRate))
+}
+
 const createPcmAudioBuffer = (ctx: AudioContext, pcmBytes: Uint8Array, sampleRate: number) => {
   const int16 = new Int16Array(
     pcmBytes.buffer.slice(pcmBytes.byteOffset, pcmBytes.byteOffset + pcmBytes.byteLength)
@@ -242,7 +290,7 @@ const getBatchRampForEngine = (engine: string, lowEndMode: boolean, xttsQuality:
   if (engine === 'piper') {
     return [STREAMED_PIPER_FIRST_BATCH_WORDS, ...baseRamp]
   }
-  if (engine === 'xtts') {
+  if (engine === 'chatterbox') {
     if (!lowEndMode && xttsQuality === 'studio') {
       return XTTS_STUDIO_BATCH_RAMP
     }
@@ -256,24 +304,73 @@ const getBatchSizeStandardForEngine = (
   lowEndMode: boolean,
   xttsQuality: XttsQualityMode
 ) => {
-  if (engine === 'xtts' && !lowEndMode && xttsQuality === 'studio') {
+  if (engine === 'chatterbox' && !lowEndMode && xttsQuality === 'studio') {
     return XTTS_STUDIO_BATCH_SIZE_STANDARD
   }
   return lowEndMode ? LOW_END_BATCH_SIZE_STANDARD : DEFAULT_BATCH_SIZE_STANDARD
 }
+
+const shouldLockParagraphBoundariesForEngine = (
+  _engine: string,
+  _lowEndMode: boolean,
+  _xttsQuality: XttsQualityMode
+) => false
 
 const getMaxTtsCharsForEngine = (
   engine: string,
   lowEndMode: boolean,
   xttsQuality: XttsQualityMode
 ) => {
-  if (engine === 'xtts' && !lowEndMode && xttsQuality === 'studio') {
+  if (engine === 'chatterbox' && !lowEndMode && xttsQuality === 'studio') {
     return XTTS_STUDIO_MAX_TTS_CHARS
   }
   return lowEndMode ? LOW_END_MAX_TTS_CHARS : DEFAULT_MAX_TTS_CHARS
 }
 
 const shouldStreamXttsFirstBatch = (_lowEndMode: boolean, _xttsQuality: XttsQualityMode) => false
+
+const getPlaybackRateForEngine = (engine: string, speed: number) => {
+  if (engine === 'chatterbox') {
+    return clampTtsSpeed(speed)
+  }
+  return 1
+}
+
+const getBufferWindowForEngine = (
+  engine: string,
+  initialBuffer: number,
+  steadyBuffer: number
+) => {
+  if (engine === 'chatterbox') {
+    return {
+      initialBuffer: Math.max(4, Math.min(initialBuffer, 6)),
+      steadyBuffer: Math.max(5, Math.min(steadyBuffer, 8))
+    }
+  }
+
+  return { initialBuffer, steadyBuffer }
+}
+
+const getXttsBufferTargets = (lowEndMode: boolean, xttsQuality: XttsQualityMode) => {
+  if (lowEndMode) {
+    return {
+      initialSeconds: XTTS_LOW_END_INITIAL_BUFFER_SEC,
+      steadySeconds: XTTS_LOW_END_STEADY_BUFFER_SEC
+    }
+  }
+
+  if (xttsQuality === 'studio') {
+    return {
+      initialSeconds: XTTS_STUDIO_INITIAL_BUFFER_SEC,
+      steadySeconds: XTTS_STUDIO_STEADY_BUFFER_SEC
+    }
+  }
+
+  return {
+    initialSeconds: XTTS_BALANCED_INITIAL_BUFFER_SEC,
+    steadySeconds: XTTS_BALANCED_STEADY_BUFFER_SEC
+  }
+}
 
 export function useAudioPlayer({
   bookStructure,
@@ -283,6 +380,7 @@ export function useAudioPlayer({
   const [isPaused, setIsPaused] = useState(false)
   const [globalSentenceIndex, setGlobalSentenceIndex] = useState(-1)
   const [status, setStatus] = useState('Idle')
+  const [buffering, setBuffering] = useState<PlaybackBufferState>(EMPTY_BUFFER_STATE)
 
   const isPlayingRef = useRef(false)
   const isPausedRef = useRef(false)
@@ -330,21 +428,24 @@ export function useAudioPlayer({
     ctx: AudioContext,
     audioBuffer: AudioBuffer,
     fadeSec: number,
-    options?: { joinGapSec?: number }
+    options?: { joinGapSec?: number; playbackRate?: number }
   ) => {
     const source = ctx.createBufferSource()
     source.buffer = audioBuffer
 
     const start = Math.max(ctx.currentTime, nextStartTimeRef.current)
     const gainNode = ctx.createGain()
-    const safeFadeSec = Math.min(fadeSec, audioBuffer.duration * 0.25)
+    const playbackRate = Math.max(0.5, options?.playbackRate ?? 1)
+    source.playbackRate.value = playbackRate
+    const effectiveDuration = audioBuffer.duration / playbackRate
+    const safeFadeSec = Math.min(fadeSec, effectiveDuration * 0.25)
     const joinGapSec = Math.max(0, options?.joinGapSec ?? 0)
 
     if (safeFadeSec > 0) {
       gainNode.gain.setValueAtTime(0, start)
       gainNode.gain.linearRampToValueAtTime(1, start + safeFadeSec)
-      gainNode.gain.setValueAtTime(1, Math.max(start, start + audioBuffer.duration - safeFadeSec))
-      gainNode.gain.linearRampToValueAtTime(0, start + audioBuffer.duration)
+      gainNode.gain.setValueAtTime(1, Math.max(start, start + effectiveDuration - safeFadeSec))
+      gainNode.gain.linearRampToValueAtTime(0, start + effectiveDuration)
     } else {
       gainNode.gain.setValueAtTime(1, start)
     }
@@ -363,8 +464,8 @@ export function useAudioPlayer({
     }
 
     source.start(start)
-    const overlap = Math.min(safeFadeSec, audioBuffer.duration * 0.25)
-    const endTime = start + audioBuffer.duration
+    const overlap = Math.min(safeFadeSec, effectiveDuration * 0.25)
+    const endTime = start + effectiveDuration
     nextStartTimeRef.current = Math.max(start + 0.02, endTime - overlap + joinGapSec)
     playbackEndTimeRef.current = endTime
 
@@ -414,7 +515,8 @@ export function useAudioPlayer({
     voicePath: string | null,
     speed: number,
     xttsQuality: XttsQualityMode
-  ) => `${engine}:${voicePath || 'default'}:${speed}:${engine === 'xtts' ? xttsQuality : 'standard'}:${text}`
+  ) =>
+    `${engine}:${voicePath || 'default'}:${engine === 'chatterbox' ? `${XTTS_AUDIO_CACHE_VERSION}:${xttsQuality}` : `${speed}:standard`}:${text}`
 
   const setCache = (key: string, value: CachedAudio) => {
     const cache = audioCacheRef.current
@@ -431,6 +533,9 @@ export function useAudioPlayer({
 
   const buildBatches = (
     startPageIndex: number,
+    engine: string,
+    lowEndMode: boolean,
+    xttsQuality: XttsQualityMode,
     batchRamp: number[],
     batchSizeStandard: number,
     maxTtsChars: number
@@ -479,6 +584,11 @@ export function useAudioPlayer({
     let currentWordCount = 0
     let currentCharCount = 0
     let batchIndex = 0
+    const lockParagraphBoundaries = shouldLockParagraphBoundariesForEngine(
+      engine,
+      lowEndMode,
+      xttsQuality
+    )
 
     const pushBatch = (endsParagraph: boolean) => {
       if (currentBatchText.length === 0) return
@@ -575,6 +685,10 @@ export function useAudioPlayer({
       const softWordLimit = Math.round(targetSize * 1.25)
       const softCharLimit = Math.round(maxTtsChars * 1.12)
 
+      if (lockParagraphBoundaries && currentBatchText.length > 0) {
+        pushBatch(true)
+      }
+
       if (
         currentBatchText.length === 0 &&
         (paragraphWordCount > softWordLimit || paragraphCharCount > maxTtsChars)
@@ -592,6 +706,12 @@ export function useAudioPlayer({
           currentCharCount = chunk.sentences.join(' ').length
           pushBatch(chunk.endsParagraph)
         })
+        continue
+      }
+
+      if (lockParagraphBoundaries) {
+        addSentencesToBatch(unit.sentences, unit.globalIndices)
+        pushBatch(true)
         continue
       }
 
@@ -644,7 +764,15 @@ export function useAudioPlayer({
       const batchSizeStandard = getBatchSizeStandardForEngine(engine, lowEndMode, xttsQuality)
       const maxTtsChars = getMaxTtsCharsForEngine(engine, lowEndMode, xttsQuality)
 
-      const batches = buildBatches(visualPageIndex, batchRamp, batchSizeStandard, maxTtsChars)
+      const batches = buildBatches(
+        visualPageIndex,
+        engine,
+        lowEndMode,
+        xttsQuality,
+        batchRamp,
+        batchSizeStandard,
+        maxTtsChars
+      )
       const firstBatch = batches[0]
       if (!firstBatch || firstBatch.text === '[[[IMAGE]]]' || !firstBatch.text.trim()) return
 
@@ -710,6 +838,7 @@ export function useAudioPlayer({
     setIsPlaying(false)
     setIsPaused(false)
     setStatus('Stopped')
+    setBuffering(EMPTY_BUFFER_STATE)
     setGlobalSentenceIndex(-1)
     highlightedSentenceIndexRef.current = -1
 
@@ -788,32 +917,110 @@ export function useAudioPlayer({
       Number.isFinite(storedInitial) && storedInitial > 0 ? storedInitial : initialDefault
     const steadyBuffer =
       Number.isFinite(storedSteady) && storedSteady > 0 ? storedSteady : steadyDefault
+    const { initialBuffer: effectiveInitialBuffer, steadyBuffer: effectiveSteadyBuffer } =
+      getBufferWindowForEngine(engine, initialBuffer, steadyBuffer)
     const fadeSec = Number.isFinite(storedCrossfadeMs)
       ? Math.min(MAX_CROSSFADE_SEC, Math.max(0, storedCrossfadeMs / 1000))
       : DEFAULT_CROSSFADE_SEC
-    const bufferedFadeSec = engine === 'xtts' ? Math.min(fadeSec, XTTS_BUFFERED_FADE_SEC) : fadeSec
+    const bufferedFadeSec =
+      engine === 'chatterbox' ? Math.min(fadeSec, XTTS_BUFFERED_FADE_SEC) : fadeSec
+    const xttsBufferTargets =
+      engine === 'chatterbox' ? getXttsBufferTargets(lowEndMode, xttsQuality) : null
 
-    const batches = buildBatches(visualPageIndex, batchRamp, batchSizeStandard, maxTtsChars)
+    const batches = buildBatches(
+      visualPageIndex,
+      engine,
+      lowEndMode,
+      xttsQuality,
+      batchRamp,
+      batchSizeStandard,
+      maxTtsChars
+    )
 
     const audioPromises: Array<Promise<AudioResult> | null> = new Array(batches.length).fill(null)
     const decodedBuffers: Array<AudioBuffer | null> = new Array(batches.length).fill(null)
-    let bufferSize = initialBuffer
-    let hasStartedPlayback = false
     const voicePath =
       engine === 'piper'
         ? localStorage.getItem('piper_model_path')
         : localStorage.getItem('custom_voice_path')
     const speed = getStoredTtsSpeed()
+    const playbackRate = getPlaybackRateForEngine(engine, speed)
+    const getDesiredBufferSize = (startIndex: number, fallback: number) => {
+      if (engine !== 'chatterbox' || !xttsBufferTargets) {
+        return fallback
+      }
+
+      const targetSeconds =
+        startIndex <= 0 ? xttsBufferTargets.initialSeconds : xttsBufferTargets.steadySeconds
+      let estimatedSeconds = 0
+      let count = 0
+
+      for (
+        let batchIndex = startIndex;
+        batchIndex < batches.length && count < XTTS_MAX_BUFFERED_BATCHES;
+        batchIndex++
+      ) {
+        estimatedSeconds += estimateXttsBatchPlaybackSeconds(batches[batchIndex], playbackRate)
+        count++
+        if (estimatedSeconds >= targetSeconds) {
+          break
+        }
+      }
+
+      return Math.max(fallback, count)
+    }
+
+    let bufferSize = getDesiredBufferSize(0, effectiveInitialBuffer)
+    let hasStartedPlayback = false
+    const isSessionStale = () =>
+      stopSignalRef.current || currentSessionId.current !== newSessionId
 
     const markPlaybackStarted = () => {
       if (!hasStartedPlayback) {
+        setBuffering(EMPTY_BUFFER_STATE)
         setStatus('Reading...')
         hasStartedPlayback = true
       }
     }
 
+    const updateBufferingUi = (readySeconds: number, targetSeconds: number) => {
+      if (hasStartedPlayback) return
+
+      const safeTarget = Math.max(targetSeconds, 0.1)
+      const clampedReady = Math.min(readySeconds, targetSeconds)
+      const progress = Math.min(1, clampedReady / safeTarget)
+
+      if (engine === 'chatterbox') {
+        setBuffering({
+          active: true,
+          engine,
+          progress,
+          readySeconds: clampedReady,
+          targetSeconds,
+          label: 'Preparing narration',
+          detail: `Building a smooth opening buffer so playback can stay continuous.`
+        })
+        setStatus(`Preparing narration ${Math.round(progress * 100)}%`)
+        return
+      }
+
+      setBuffering({
+        active: true,
+        engine,
+        progress,
+        readySeconds: clampedReady,
+        targetSeconds,
+        label: engine === 'piper' ? 'Loading voice' : 'Preparing audio',
+        detail:
+          engine === 'piper'
+            ? 'Getting the voice ready for playback.'
+            : 'Loading the first playback segment.'
+      })
+      setStatus(engine === 'piper' ? 'Loading voice...' : 'Buffering...')
+    }
+
     const triggerGeneration = (index: number) => {
-      if (index >= batches.length || audioPromises[index]) return
+      if (index >= batches.length || audioPromises[index] || isSessionStale()) return
       const batch = batches[index]
 
       if (batch.text === '[[[IMAGE]]]') {
@@ -832,6 +1039,10 @@ export function useAudioPlayer({
               decodedBuffers[index] = decoded
               return diskHit
             }
+          }
+
+          if (isSessionStale()) {
+            return { status: 'cancelled', audio_data: null }
           }
 
           const result = await window.api.generate(batch.text, speed, newSessionId, {
@@ -865,7 +1076,8 @@ export function useAudioPlayer({
     }
 
     const supportsFirstBatchStreaming =
-      engine === 'piper' || (engine === 'xtts' && shouldStreamXttsFirstBatch(lowEndMode, xttsQuality))
+      engine === 'piper' ||
+      (engine === 'chatterbox' && shouldStreamXttsFirstBatch(lowEndMode, xttsQuality))
     const firstBatch = batches[0]
     const firstBatchCacheKey =
       firstBatch && firstBatch.text !== '[[[IMAGE]]]'
@@ -890,7 +1102,7 @@ export function useAudioPlayer({
     }
 
     const streamFirstBatch = async (batch: AudioBatch) => {
-      const streamVoicePath = engine === 'xtts' ? voicePath || 'default_speaker.wav' : voicePath
+      const streamVoicePath = engine === 'chatterbox' ? voicePath || '' : voicePath
       if (engine === 'piper' && !streamVoicePath) {
         return { mode: 'fallback' as const, started: false }
       }
@@ -899,7 +1111,7 @@ export function useAudioPlayer({
       streamAbortControllerRef.current = controller
       let pendingPcm = new Uint8Array(0)
       let scheduledAudio = false
-      let sampleRate = engine === 'xtts' ? 24000 : 22050
+      let sampleRate = engine === 'chatterbox' ? 24000 : 22050
 
       const flushPlayablePcm = (force = false) => {
         const playableLength = pendingPcm.byteLength - (pendingPcm.byteLength % 2)
@@ -914,7 +1126,8 @@ export function useAudioPlayer({
         const { start } = scheduleAudioBuffer(
           ctx,
           audioBuffer,
-          Math.min(fadeSec, STREAM_CHUNK_FADE_SEC)
+          Math.min(fadeSec, STREAM_CHUNK_FADE_SEC),
+          { playbackRate: 1 }
         )
 
         if (!scheduledAudio) {
@@ -936,7 +1149,7 @@ export function useAudioPlayer({
             text: batch.text,
             session_id: newSessionId,
             engine,
-            speaker_wav: streamVoicePath || 'default_speaker.wav',
+            speaker_wav: streamVoicePath || '',
             piper_model_path: engine === 'piper' ? streamVoicePath || '' : '',
             language: 'en',
             speed,
@@ -1003,6 +1216,34 @@ export function useAudioPlayer({
     }
 
     let nextGenerationIndex = shouldStreamFirstBatch ? 1 : 0
+    if (shouldStreamFirstBatch) {
+      bufferSize = getDesiredBufferSize(1, effectiveInitialBuffer)
+    }
+    const getContiguousReadySeconds = (startIndex: number) => {
+      let total = 0
+
+      for (let index = startIndex; index < batches.length; index++) {
+        const batch = batches[index]
+
+        if (batch.text === '[[[IMAGE]]]') {
+          total += IMAGE_PAUSE_SEC
+          continue
+        }
+
+        const readyBuffer = decodedBuffers[index]
+        if (!readyBuffer) break
+
+        total += readyBuffer.duration / playbackRate
+
+        if (engine === 'chatterbox') {
+          const nextBatch = index + 1 < batches.length ? batches[index + 1] : null
+          total += getXttsJoinGapForBatch(batch, nextBatch)
+        }
+      }
+
+      return total
+    }
+
     const triggerUpTo = (targetExclusive: number) => {
       while (nextGenerationIndex < batches.length && nextGenerationIndex < targetExclusive) {
         triggerGeneration(nextGenerationIndex)
@@ -1010,13 +1251,82 @@ export function useAudioPlayer({
       }
     }
 
-    try {
-      setStatus('Buffering...')
-      const firstBatchStreamPromise = shouldStreamFirstBatch ? streamFirstBatch(batches[0]) : null
-      triggerUpTo((shouldStreamFirstBatch ? 1 : 0) + bufferSize)
+    let prefetchPromise: Promise<void> | null = null
+    let desiredReadyStartIndex = shouldStreamFirstBatch ? 1 : 0
+    let desiredReadySeconds = 0
 
-      if (!shouldStreamFirstBatch && batches.length > 0 && audioPromises[0]) {
-        await audioPromises[0]
+    const ensureReadyAudio = (startIndex: number, targetSeconds: number) => {
+      if (engine !== 'chatterbox' || !xttsBufferTargets) {
+        return Promise.resolve()
+      }
+
+      desiredReadyStartIndex = Math.max(0, startIndex)
+      desiredReadySeconds = Math.max(0, targetSeconds)
+
+      if (prefetchPromise) {
+        return prefetchPromise
+      }
+
+      prefetchPromise = (async () => {
+        while (!isSessionStale()) {
+          const readySeconds = getContiguousReadySeconds(desiredReadyStartIndex)
+          updateBufferingUi(readySeconds, desiredReadySeconds)
+
+          if (readySeconds >= desiredReadySeconds) {
+            break
+          }
+
+          if (nextGenerationIndex < desiredReadyStartIndex) {
+            nextGenerationIndex = desiredReadyStartIndex
+          }
+
+          if (nextGenerationIndex >= batches.length) {
+            break
+          }
+
+          const generationIndex = nextGenerationIndex
+          nextGenerationIndex += 1
+          triggerGeneration(generationIndex)
+
+          const promise = audioPromises[generationIndex]
+          if (!promise) {
+            continue
+          }
+
+          try {
+            await promise
+          } catch (error) {
+            console.warn('Premium prefetch failed', error)
+            break
+          }
+        }
+      })().finally(() => {
+        prefetchPromise = null
+        if (
+          !isSessionStale() &&
+          engine === 'chatterbox' &&
+          xttsBufferTargets &&
+          getContiguousReadySeconds(desiredReadyStartIndex) < desiredReadySeconds &&
+          nextGenerationIndex < batches.length
+        ) {
+          void ensureReadyAudio(desiredReadyStartIndex, desiredReadySeconds)
+        }
+      })
+
+      return prefetchPromise
+    }
+
+    try {
+      updateBufferingUi(0, engine === 'chatterbox' && xttsBufferTargets ? xttsBufferTargets.initialSeconds : 1)
+      const firstBatchStreamPromise = shouldStreamFirstBatch ? streamFirstBatch(batches[0]) : null
+      if (engine === 'chatterbox' && xttsBufferTargets) {
+        await ensureReadyAudio(shouldStreamFirstBatch ? 1 : 0, xttsBufferTargets.initialSeconds)
+      } else {
+        triggerUpTo((shouldStreamFirstBatch ? 1 : 0) + bufferSize)
+
+        if (!shouldStreamFirstBatch && batches.length > 0 && audioPromises[0]) {
+          await audioPromises[0]
+        }
       }
 
       for (let i = 0; i < batches.length; i++) {
@@ -1035,7 +1345,9 @@ export function useAudioPlayer({
           if (streamResult.mode === 'cancelled' || stopSignalRef.current) break
 
           if (streamResult.mode !== 'fallback') {
-            if (i === 0) bufferSize = steadyBuffer
+            if (i === 0) {
+              bufferSize = getDesiredBufferSize(i + 1, effectiveSteadyBuffer)
+            }
             triggerUpTo(i + 1 + bufferSize)
             continue
           }
@@ -1043,6 +1355,10 @@ export function useAudioPlayer({
 
         if (!audioPromises[i]) {
           triggerGeneration(i)
+        }
+
+        if (engine === 'chatterbox' && xttsBufferTargets) {
+          void ensureReadyAudio(i, xttsBufferTargets.steadySeconds)
         }
 
         try {
@@ -1053,17 +1369,24 @@ export function useAudioPlayer({
         }
 
         if (stopSignalRef.current) break
-        if (i === 0) bufferSize = steadyBuffer
-        triggerUpTo(i + 1 + bufferSize)
+        if (result?.status === 'cancelled') break
+        if (engine === 'chatterbox' && xttsBufferTargets) {
+          void ensureReadyAudio(i + 1, xttsBufferTargets.steadySeconds)
+        } else {
+          if (i === 0) {
+            bufferSize = getDesiredBufferSize(i + 1, effectiveSteadyBuffer)
+          }
+          triggerUpTo(i + 1 + bufferSize)
+        }
 
         if (result && result.status === 'skipped') {
           const idx = batch.globalIndices[0]
 
           const startTime = Math.max(ctx.currentTime, nextStartTimeRef.current)
           highlightScheduleRef.current.push({ time: startTime, globalIndex: idx })
-          playbackEndTimeRef.current = startTime + 2.0
+          playbackEndTimeRef.current = startTime + IMAGE_PAUSE_SEC
 
-          const imagePause = 2.0
+          const imagePause = IMAGE_PAUSE_SEC
           nextStartTimeRef.current = startTime + imagePause
 
           const waitMs = (nextStartTimeRef.current - ctx.currentTime) * 1000
@@ -1083,12 +1406,18 @@ export function useAudioPlayer({
 
             const nextBatch = i + 1 < batches.length ? batches[i + 1] : null
             const joinGapSec =
-              engine === 'xtts' ? getXttsJoinGapForBatch(batch, nextBatch) : 0
+              engine === 'chatterbox' ? getXttsJoinGapForBatch(batch, nextBatch) : 0
 
-            const { start } = scheduleAudioBuffer(ctx, audioBuffer, bufferedFadeSec, { joinGapSec })
+            const { start } = scheduleAudioBuffer(ctx, audioBuffer, bufferedFadeSec, {
+              joinGapSec,
+              playbackRate
+            })
             markPlaybackStarted()
 
-            const durations = estimateSentenceDurations(batch.sentences, audioBuffer.duration)
+            const durations = estimateSentenceDurations(
+              batch.sentences,
+              audioBuffer.duration / playbackRate
+            )
             let accumulatedTime = 0
             durations.forEach((dur, idx) => {
               const triggerTime = start + accumulatedTime + 0.08
@@ -1132,6 +1461,7 @@ export function useAudioPlayer({
         }
 
         setStatus('Completed')
+        setBuffering(EMPTY_BUFFER_STATE)
         setIsPlaying(false)
         setIsPaused(false)
         setGlobalSentenceIndex(-1)
@@ -1140,6 +1470,7 @@ export function useAudioPlayer({
     } catch (e: any) {
       console.error(e)
       setStatus('Error: ' + e.message)
+      setBuffering(EMPTY_BUFFER_STATE)
       setIsPlaying(false)
       highlightedSentenceIndexRef.current = -1
     } finally {
@@ -1186,5 +1517,5 @@ export function useAudioPlayer({
     }
   }, [])
 
-  return { isPlaying, isPaused, globalSentenceIndex, status, play, pause, stop }
+  return { isPlaying, isPaused, globalSentenceIndex, status, buffering, play, pause, stop }
 }

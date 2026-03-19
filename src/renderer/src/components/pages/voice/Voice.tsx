@@ -93,7 +93,7 @@ export default function Voice() {
       {engine === 'piper' ? (
         <div className="p-5 bg-white/5 text-zinc-200 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
           You are currently using <strong>Piper TTS</strong>. Custom voice cloning is only
-          available with <strong>Coqui XTTS</strong>.
+          available with <strong>Chatterbox</strong>.
           <div className="mt-3">
             <Link to="/settings" className="underline hover:text-white">
               Switch engine in Settings

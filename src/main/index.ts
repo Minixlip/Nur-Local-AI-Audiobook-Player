@@ -216,11 +216,11 @@ const getBackendTtsStatus = async (): Promise<{
   backendOk: boolean
   backendMessage: string | null
   device: string | null
-  xtts: TtsModelStatus
+  chatterbox: TtsModelStatus
 }> => {
   const payload = await backendJsonRequest<{
     device?: string
-    xtts?: { state?: TtsModelStatus['state']; message?: string; device?: string }
+    chatterbox?: { state?: TtsModelStatus['state']; message?: string; device?: string }
   }>('GET', '/models/status')
 
   if (!payload) {
@@ -235,14 +235,14 @@ const getBackendTtsStatus = async (): Promise<{
       backendOk: false,
       backendMessage,
       device: null,
-      xtts: createModelStatus('xtts', 'missing', {
+      chatterbox: createModelStatus('chatterbox', 'missing', {
         message: backendMessage
       })
     }
   }
 
-  const device = payload.xtts?.device || payload.device || 'unknown'
-  const state = payload.xtts?.state || 'missing'
+  const device = payload.chatterbox?.device || payload.device || 'unknown'
+  const state = payload.chatterbox?.state || 'missing'
   if (backendState.state !== 'running' || !backendState.running) {
     setBackendState({
       state: 'running',
@@ -256,8 +256,9 @@ const getBackendTtsStatus = async (): Promise<{
     backendOk: true,
     backendMessage: null,
     device,
-    xtts: createModelStatus('xtts', state, {
-      message: payload.xtts?.message || 'XTTS is available as an optional download.'
+    chatterbox: createModelStatus('chatterbox', state, {
+      message:
+        payload.chatterbox?.message || 'Chatterbox is available as an optional download.'
     })
   }
 }
@@ -272,7 +273,7 @@ const getTtsStatus = async (): Promise<TtsStatusSnapshot> => {
     mainLogPath: getMainLogPath(),
     device: backendStatus.device,
     piper: getPiperStatus(),
-    xtts: backendStatus.xtts
+    chatterbox: backendStatus.chatterbox
   }
 }
 
@@ -761,7 +762,7 @@ ipcMain.handle('tts:ensureModel', async (_event, engine: TtsEngine) => {
     return getTtsStatus()
   }
 
-  await backendJsonRequest('POST', '/models/prepare', { engine: 'xtts' })
+  await backendJsonRequest('POST', '/models/prepare', { engine: 'chatterbox' })
   return getTtsStatus()
 })
 
@@ -793,71 +794,74 @@ ipcMain.handle('tts:health', async () => {
   }
 })
 
-ipcMain.handle('tts:generate', async (_event, { text, speed, sessionId, engine, voicePath }) => {
-  const safeSpeed = speed || 1.0
-  const safeEngine: TtsEngine = engine === 'xtts' ? 'xtts' : DEFAULT_TTS_ENGINE
+ipcMain.handle(
+  'tts:generate',
+  async (_event, { text, speed, sessionId, engine, voicePath, quality_mode }) => {
+    const safeSpeed = speed || 1.0
+    const safeEngine: TtsEngine = engine === 'chatterbox' ? 'chatterbox' : DEFAULT_TTS_ENGINE
 
-  let safeVoice = voicePath
-  if (!safeVoice && safeEngine === 'xtts') {
-    safeVoice = 'default_speaker.wav'
-  }
-  if (!safeVoice && safeEngine === 'piper') {
-    safeVoice = hasPiperModel() ? getPiperOnnxPath() : ''
-  }
+    let safeVoice = voicePath
+    if (!safeVoice && safeEngine === 'piper') {
+      safeVoice = hasPiperModel() ? getPiperOnnxPath() : ''
+    }
+    if (!safeVoice) {
+      safeVoice = ''
+    }
 
-  return new Promise((resolve, reject) => {
-    const request = net.request({
-      method: 'POST',
-      protocol: 'http:',
-      hostname: BACKEND_HOST,
-      port: BACKEND_PORT,
-      path: '/tts'
-    })
+    return new Promise((resolve, reject) => {
+      const request = net.request({
+        method: 'POST',
+        protocol: 'http:',
+        hostname: BACKEND_HOST,
+        port: BACKEND_PORT,
+        path: '/tts'
+      })
 
-    request.setHeader('Content-Type', 'application/json')
+      request.setHeader('Content-Type', 'application/json')
 
-    request.on('response', (response) => {
-      const chunks: Buffer[] = []
+      request.on('response', (response) => {
+        const chunks: Buffer[] = []
 
-      // 499 = Client Closed Request (Our custom cancellation code)
-      if (response.statusCode === 499) {
-        resolve({ status: 'cancelled', audio_data: null })
-        return
-      }
-      response.on('data', (chunk) => chunks.push(chunk))
-      response.on('end', () => {
-        if (response.statusCode !== 200) {
-          const raw = Buffer.concat(chunks).toString('utf-8')
-          try {
-            const payload = JSON.parse(raw) as { detail?: string }
-            reject(payload.detail || `Python Error: ${response.statusCode}`)
-          } catch {
-            reject(raw || `Python Error: ${response.statusCode}`)
-          }
+        if (response.statusCode === 499) {
+          resolve({ status: 'cancelled', audio_data: null })
           return
         }
-        const buffer = Buffer.concat(chunks)
-        resolve({ status: 'success', audio_data: buffer })
+        response.on('data', (chunk) => chunks.push(chunk))
+        response.on('end', () => {
+          if (response.statusCode !== 200) {
+            const raw = Buffer.concat(chunks).toString('utf-8')
+            try {
+              const payload = JSON.parse(raw) as { detail?: string }
+              reject(payload.detail || `Python Error: ${response.statusCode}`)
+            } catch {
+              reject(raw || `Python Error: ${response.statusCode}`)
+            }
+            return
+          }
+          const buffer = Buffer.concat(chunks)
+          resolve({ status: 'success', audio_data: buffer })
+        })
       })
+
+      request.on('error', (err) => reject(err.message))
+
+      request.write(
+        JSON.stringify({
+          text,
+          session_id: sessionId,
+          engine: safeEngine,
+          speaker_wav: safeEngine === 'chatterbox' ? safeVoice : '',
+          piper_model_path: safeEngine === 'piper' ? safeVoice : '',
+          language: 'en',
+          speed: safeSpeed,
+          quality_mode: quality_mode === 'balanced' ? 'balanced' : 'studio'
+        })
+      )
+
+      request.end()
     })
-
-    request.on('error', (err) => reject(err.message))
-
-    request.write(
-      JSON.stringify({
-        text: text,
-        session_id: sessionId,
-        engine: safeEngine,
-        speaker_wav: safeVoice,
-        piper_model_path: safeVoice,
-        language: 'en',
-        speed: safeSpeed
-      })
-    )
-
-    request.end()
-  })
-})
+  }
+)
 
 // 2. PLAY FILE (Native Fallback)
 ipcMain.handle('audio:play', async (_event, { filepath }) => {

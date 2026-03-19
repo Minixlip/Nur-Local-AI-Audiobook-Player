@@ -1,4 +1,4 @@
-export type TtsEngine = 'piper' | 'xtts'
+export type TtsEngine = 'piper' | 'chatterbox'
 export type TtsBackendState = 'starting' | 'running' | 'missing' | 'error' | 'stopped'
 
 export type TtsModelState = 'missing' | 'downloading' | 'preparing' | 'ready' | 'error'
@@ -20,7 +20,7 @@ export interface TtsStatusSnapshot {
   mainLogPath: string | null
   device: string | null
   piper: TtsModelStatus
-  xtts: TtsModelStatus
+  chatterbox: TtsModelStatus
 }
 
 export const DEFAULT_TTS_ENGINE: TtsEngine = 'piper'
@@ -46,5 +46,5 @@ export const EMPTY_TTS_STATUS: TtsStatusSnapshot = {
   mainLogPath: null,
   device: null,
   piper: createModelStatus('piper', 'missing'),
-  xtts: createModelStatus('xtts', 'missing')
+  chatterbox: createModelStatus('chatterbox', 'missing')
 }

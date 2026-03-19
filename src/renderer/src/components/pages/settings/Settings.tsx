@@ -22,7 +22,7 @@ export default function Settings(): React.JSX.Element {
   const [customVoicePath, setCustomVoicePath] = useState<string>('')
 
   const piperStatus = status.piper
-  const xttsStatus = status.xtts
+  const chatterboxStatus = status.chatterbox
   const piperPath = piperStatus.path || ''
   const piperProgress = piperStatus.progress ?? 0
   const { lowEndMode, initialBuffer, steadyBuffer, crossfadeMs, speechRate, qualityMode } =
@@ -36,8 +36,8 @@ export default function Settings(): React.JSX.Element {
 
   const handleDownload = async (engineToPrepare: TtsEngine, event?: React.MouseEvent) => {
     event?.stopPropagation()
-    if (engineToPrepare === 'xtts') {
-      setStoredTtsEngine('xtts')
+    if (engineToPrepare === 'chatterbox') {
+      setStoredTtsEngine('chatterbox')
     }
     await window.api.ensureModel(engineToPrepare)
   }
@@ -81,7 +81,7 @@ export default function Settings(): React.JSX.Element {
     updatePreference('speechRate', next)
   }
 
-  const handleXttsQualityModeChange = (mode: PlaybackQualityMode) => {
+  const handlePremiumQualityModeChange = (mode: PlaybackQualityMode) => {
     updatePreference('qualityMode', mode)
   }
 
@@ -149,6 +149,7 @@ export default function Settings(): React.JSX.Element {
 
   const readingPaceLabel =
     speechRate < 0.95 ? 'Measured' : speechRate > 1.05 ? 'Brisk' : 'Natural'
+  const premiumEngineName = 'Chatterbox'
 
   return (
     <div className="p-8 text-white h-full overflow-y-auto">
@@ -166,25 +167,25 @@ export default function Settings(): React.JSX.Element {
           <div className="space-y-4">
             <div
               className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
-                engine === 'xtts'
+                engine === 'chatterbox'
                   ? 'bg-zinc-900/40 border-white/20 shadow-lg'
                   : 'bg-white/5 border-white/10'
               }`}
             >
-              <Tooltip label="Select Coqui XTTS" className="w-full">
+              <Tooltip label={`Select ${premiumEngineName}`} className="w-full">
                 <button
-                  onClick={() => handleEngineChange('xtts')}
+                  onClick={() => handleEngineChange('chatterbox')}
                   className="w-full px-5 py-4 text-left flex justify-between items-center gap-4"
                 >
                   <div className="space-y-1">
                     <div className="font-semibold text-lg flex items-center gap-2 text-zinc-100">
-                      Coqui XTTS
+                      {premiumEngineName}
                       <span className="text-xs bg-zinc-800 text-zinc-200 px-2 py-0.5 rounded border border-white/10">
                         HQ
                       </span>
                     </div>
                     <div className="text-sm text-zinc-300 mt-1">
-                      Realistic, emotive voices. Supports cloning.
+                      Realistic, emotive local narration. Supports cloning.
                       <span className="ml-2 text-yellow-500 text-xs font-mono">Requires GPU</span>
                     </div>
                     {status.device && (
@@ -192,17 +193,18 @@ export default function Settings(): React.JSX.Element {
                         Backend device: {status.device.toUpperCase()}
                       </div>
                     )}
-                    {xttsStatus.message && !xttsStatus.ready && (
-                      <div className="text-xs text-zinc-400 mt-2">{xttsStatus.message}</div>
+                    {chatterboxStatus.message && !chatterboxStatus.ready && (
+                      <div className="text-xs text-zinc-400 mt-2">{chatterboxStatus.message}</div>
                     )}
                   </div>
-                  {xttsStatus.ready ? (
-                    engine === 'xtts' ? (
+                  {chatterboxStatus.ready ? (
+                    engine === 'chatterbox' ? (
                       <div className="h-6 w-6 rounded-full bg-white shadow-inner shadow-black/20"></div>
                     ) : (
                       <div className="h-6 w-6 rounded-full border-2 border-white/20"></div>
                     )
-                  ) : xttsStatus.state === 'preparing' || xttsStatus.state === 'downloading' ? (
+                  ) : chatterboxStatus.state === 'preparing' ||
+                    chatterboxStatus.state === 'downloading' ? (
                     <div className="flex items-center gap-3">
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-300">
                         Preparing
@@ -211,13 +213,13 @@ export default function Settings(): React.JSX.Element {
                     </div>
                   ) : (
                     <div className="rounded-full border border-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-200">
-                      {xttsStatus.state === 'error' ? 'Retry' : 'Download & Use'}
+                      {chatterboxStatus.state === 'error' ? 'Retry' : 'Download & Use'}
                     </div>
                   )}
                 </button>
               </Tooltip>
 
-              {engine === 'xtts' && xttsStatus.ready && (
+              {engine === 'chatterbox' && chatterboxStatus.ready && (
                 <div className="px-5 pb-5 pt-2 border-t border-white/10 bg-black/20">
                   <div className="mt-3 text-sm font-semibold text-zinc-300 mb-2">
                     Voice Cloning (Reference Audio)
@@ -245,8 +247,8 @@ export default function Settings(): React.JSX.Element {
                       </div>
                     ) : (
                       <div className="flex-1 text-xs text-zinc-400 italic bg-black/20 p-3 rounded-lg border border-dashed border-white/10">
-                        Using Default Female Voice. Upload a short WAV file (6-10s) to clone a
-                        voice.
+                        Using the built-in {premiumEngineName} voice. Upload a short WAV file
+                        (6-10s) to clone a voice.
                       </div>
                     )}
 
@@ -365,7 +367,7 @@ export default function Settings(): React.JSX.Element {
             <div>
               <h2 className="text-xl font-semibold text-zinc-100">Voice Delivery</h2>
               <p className="text-sm text-zinc-400 mt-1">
-                Control pacing and how much XTTS prioritizes natural phrasing over speed.
+                Control pacing and how much {premiumEngineName} prioritizes natural phrasing over speed.
               </p>
             </div>
             <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
@@ -409,7 +411,7 @@ export default function Settings(): React.JSX.Element {
             </div>
 
             <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4">
-              <div className="text-sm font-medium text-zinc-200">XTTS quality preset</div>
+              <div className="text-sm font-medium text-zinc-200">{premiumEngineName} quality preset</div>
               <div className="mt-1 text-[11px] text-zinc-400">
                 Studio uses larger batches and less aggressive startup optimization for more natural delivery.
               </div>
@@ -432,7 +434,7 @@ export default function Settings(): React.JSX.Element {
                   return (
                     <button
                       key={option.value}
-                      onClick={() => handleXttsQualityModeChange(option.value)}
+                      onClick={() => handlePremiumQualityModeChange(option.value)}
                       className={`rounded-2xl border px-4 py-3 text-left transition ${
                         active
                           ? 'border-white/30 bg-white/10 shadow-[0_14px_30px_rgba(0,0,0,0.25)]'
@@ -452,7 +454,7 @@ export default function Settings(): React.JSX.Element {
               </div>
               {lowEndMode && (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-[11px] text-amber-100">
-                  Low-end mode is on, so playback will still favor stability over maximum XTTS quality.
+                  Low-end mode is on, so playback will still favor stability over maximum {premiumEngineName} quality.
                 </div>
               )}
             </div>
@@ -637,7 +639,7 @@ export default function Settings(): React.JSX.Element {
             </div>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="text-sm font-semibold text-zinc-200">XTTS cache location</div>
+            <div className="text-sm font-semibold text-zinc-200">{premiumEngineName} cache location</div>
             <div className="text-xs text-zinc-400 mt-1">
               Stored by the TTS engine in the user cache directory. Typical path:
             </div>

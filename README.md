@@ -1,4 +1,4 @@
-# Nur — Local AI Audiobook Player
+# Nur - Local AI Audiobook Player
 
 Nur is a desktop app that turns EPUB ebooks into synchronized audiobooks locally, using offline AI Text-to-Speech engines. It focuses on privacy, speed, and a modern glass-style reading experience.
 
@@ -8,7 +8,7 @@ Nur is a desktop app that turns EPUB ebooks into synchronized audiobooks locally
 
 ## Features
 
-- Local AI TTS: Coqui XTTS v2 (high quality) + Piper TTS (high speed).
+- Local AI TTS: Chatterbox (high quality) + Piper TTS (high speed).
 - Voice Studio: Save voice samples and reuse them across books.
 - Reader Sync: Highlights the currently spoken sentence in real time.
 - Glass UI: Polished, modern interface with a focus on readability.
@@ -65,7 +65,8 @@ For notarized macOS builds, provide either `APPLE_NOTARY_KEYCHAIN_PROFILE` or al
 
 - The Python TTS backend must be built on the same host platform you want to ship.
 - `npm run build:mac` now prepares a Mac-native `nur_engine` bundle before Electron packaging.
-- Windows uses the CUDA backend requirements; macOS uses standard PyTorch wheels for CPU/MPS.
+- Windows uses the CUDA 12.4 backend requirements for Chatterbox; macOS uses standard PyTorch wheels for CPU/MPS.
+- Build with Python 3.11 if available, otherwise 3.10.
 
 ## Repository Structure
 
@@ -80,7 +81,7 @@ resources/     # Packaged assets (engine, default speaker)
 
 ## Notes
 
-- XTTS downloads its model on first run (cached in the user directory).
+- Chatterbox downloads its model on first run (cached in the user directory).
 - Piper downloads into the app data folder via the in-app downloader.
 
 ## Roadmap

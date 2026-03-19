@@ -11,6 +11,9 @@ import Reader from './components/pages/reader/Reader'
 import Voice from './components/pages/voice/Voice'
 import Settings from './components/pages/settings/Settings'
 
+const getEngineDisplayName = (engine: string) =>
+  engine === 'chatterbox' ? 'Chatterbox' : 'Piper'
+
 const routeMeta: Record<string, { title: string; description: string }> = {
   '/': {
     title: 'Library',
@@ -18,7 +21,7 @@ const routeMeta: Record<string, { title: string; description: string }> = {
   },
   '/voice-market': {
     title: 'Voice Studio',
-    description: 'Manage voices, cloning, and TTS preferences.'
+    description: 'Manage voices, cloning, and narration preferences.'
   },
   '/settings': {
     title: 'Settings',
@@ -73,7 +76,7 @@ function AppFrame({
   const hasBackendIssue = !backendOk && backendState === 'error'
   const hasModelIssue = selectedModelState === 'error'
   const isPreparingPiper = engine === 'piper' && selectedModelState === 'downloading'
-  const showPiperShortcut = engine === 'xtts' && backendOk
+  const showPiperShortcut = engine === 'chatterbox' && backendOk
   const showOpenSettings = hasBackendIssue || hasModelIssue
   const showRetryAction = hasBackendIssue || hasModelIssue
   const showRevealLogs = hasBackendIssue
@@ -94,7 +97,7 @@ function AppFrame({
     if (engine === 'piper') {
       return hasModelIssue ? 'Voice setup failed' : 'Getting your voice ready'
     }
-    return hasModelIssue ? 'XTTS needs attention' : 'Preparing XTTS'
+    return hasModelIssue ? 'Chatterbox needs attention' : 'Preparing Chatterbox'
   }
 
   const overlayHint = () => {
@@ -117,9 +120,9 @@ function AppFrame({
     }
 
     if (hasModelIssue) {
-      return 'XTTS could not be prepared with the current setup.'
+      return 'Chatterbox could not be prepared with the current setup.'
     }
-    return 'High-quality XTTS setup can take a few minutes on first launch.'
+    return 'High-quality Chatterbox setup can take a few minutes on first launch.'
   }
 
   const overlaySupportingCopy = () => {
@@ -129,7 +132,7 @@ function AppFrame({
     if (!backendOk) {
       return 'Nur will continue automatically as soon as the engine is ready.'
     }
-    if (engine === 'xtts') {
+    if (engine === 'chatterbox') {
       return 'Need something faster? Switch to Piper and start reading immediately.'
     }
     return 'Nur will continue automatically as soon as setup finishes.'
@@ -168,7 +171,7 @@ function AppFrame({
                   {backendOk ? 'Engine ready' : 'Preparing engine'}
                 </div>
                 <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-zinc-300 md:block">
-                  {engine.toUpperCase()}
+                  {getEngineDisplayName(engine)}
                 </div>
               </div>
             </header>
