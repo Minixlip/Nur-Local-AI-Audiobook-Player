@@ -1,16 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import {
-  FiList,
-  FiSliders,
-  FiChevronLeft,
-  FiChevronRight,
-  FiPlay,
-  FiPause,
-  FiStopCircle,
-  FiCrosshair,
-  FiLoader
-} from 'react-icons/fi'
+import { FiChevronLeft } from 'react-icons/fi'
 import { useAudioPlayer } from '../../../hooks/useAudioPlayer'
 import { useBookImporter } from '../../../hooks/useBookImporter'
 import { useLibrary, SavedBook } from '../../../hooks/useLibrary'
@@ -18,9 +8,8 @@ import { useReaderSettings } from '../../../hooks/useReaderSettings'
 import AppearanceMenu from '../../AppearanceMenu'
 import { BookViewer } from '../../bookViewer'
 import { TableOfContents } from '../../TableOfContents'
-import Tooltip from '../../ui/Tooltip'
-
-const PLAYER_WAVEFORM_HEIGHTS = [10, 15, 21, 13, 18, 24, 16, 20, 12, 19, 14, 17]
+import { ReaderPlayer } from './ReaderPlayer'
+import { getPlayerTheme, getReaderTheme } from './readerThemes'
 
 export default function Reader(): React.JSX.Element {
   const { bookId } = useParams()
@@ -318,262 +307,43 @@ export default function Reader(): React.JSX.Element {
     )
   }
 
-  const playerTheme =
-    settings.theme === 'light'
-      ? {
-          shell: 'bg-white/95 text-zinc-900 border-black/10',
-          button: 'bg-zinc-900 text-white hover:bg-zinc-800',
-          iconButton: 'border-black/10 bg-black/5 text-zinc-700 hover:bg-black/10',
-          statusLabel: 'text-zinc-500',
-          statusValue: 'text-emerald-600',
-          separator: 'border-black/10',
-          wave: 'bg-zinc-700'
-        }
-      : settings.theme === 'sepia'
-        ? {
-            shell: 'bg-[#f1e8d5]/95 text-[#3b2f1f] border-black/10',
-            button: 'bg-[#3b2f1f] text-[#f4ecd8] hover:bg-[#2f2619]',
-            iconButton: 'border-black/10 bg-black/5 text-[#3b2f1f] hover:bg-black/10',
-            statusLabel: 'text-[#6a5a4a]',
-            statusValue: 'text-emerald-700',
-            separator: 'border-black/10',
-            wave: 'bg-[#3b2f1f]'
-          }
-        : {
-            shell: 'bg-white/10 text-zinc-100 border-white/20',
-            button: 'bg-white text-black hover:bg-zinc-200',
-            iconButton: 'border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10',
-            statusLabel: 'text-zinc-400',
-            statusValue: 'text-emerald-400',
-            separator: 'border-white/10',
-            wave: 'bg-white'
-          }
-
-  const readerTheme =
-    settings.theme === 'light'
-      ? {
-          viewport: 'bg-[#ece8e0]',
-          ambient:
-            'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.9),rgba(236,232,224,0.92)_45%,rgba(223,217,205,0.9)_100%)]',
-          hud: 'bg-white/75 border-black/10 text-zinc-900',
-          surface: 'bg-[#fcfbf7]/95 border-black/10 shadow-[0_32px_80px_rgba(60,48,29,0.14)]',
-          progressTrack: 'bg-black/[0.08]',
-          progressFill: 'bg-zinc-900',
-          eyebrow: 'text-zinc-500',
-          meta: 'text-zinc-600',
-          title: 'text-zinc-900'
-        }
-      : settings.theme === 'sepia'
-        ? {
-            viewport: 'bg-[#e6dcc7]',
-          ambient:
-            'bg-[radial-gradient(circle_at_top,rgba(255,245,220,0.62),rgba(230,220,199,0.92)_52%,rgba(214,201,174,0.9)_100%)]',
-            hud: 'bg-[#f5ecda]/80 border-black/10 text-[#3b2f1f]',
-            surface: 'bg-[#f4ecd8]/95 border-black/10 shadow-[0_32px_80px_rgba(66,43,12,0.16)]',
-            progressTrack: 'bg-black/10',
-            progressFill: 'bg-[#3b2f1f]',
-            eyebrow: 'text-[#7a6652]',
-            meta: 'text-[#6b5844]',
-            title: 'text-[#2f2418]'
-          }
-        : {
-            viewport: 'bg-[#101113]',
-            ambient:
-              'bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),rgba(16,17,19,0.72)_45%,rgba(10,11,13,0.95)_100%)]',
-            hud: 'bg-black/35 border-white/10 text-zinc-100',
-            surface: 'bg-[#15171b]/95 border-white/10 shadow-[0_32px_90px_rgba(0,0,0,0.42)]',
-            progressTrack: 'bg-white/10',
-            progressFill: 'bg-emerald-300',
-            eyebrow: 'text-zinc-500',
-            meta: 'text-zinc-400',
-            title: 'text-zinc-100'
-          }
+  const playerTheme = getPlayerTheme(settings.theme)
+  const readerTheme = getReaderTheme(settings.theme)
 
   const pagePercent = totalPages > 0 ? ((visualPageIndex + 1) / totalPages) * 100 : 0
-  const bufferingPercent = Math.round(buffering.progress * 100)
-  const bufferingReadyLabel =
-    buffering.targetSeconds > 0
-      ? `${Math.round(buffering.readySeconds)}s of ${Math.round(buffering.targetSeconds)}s ready`
-      : ''
-  const isPreparingNarration = buffering.active && buffering.engine === 'chatterbox'
-  const primaryPlayerAction = buffering.active ? stop : isPlaying ? (isPaused ? play : pause) : play
-  const primaryPlayerLabel = buffering.active
-    ? 'Cancel narration preparation'
-    : isPlaying && !isPaused
-      ? 'Pause playback'
-      : 'Start playback'
+  const handlePrimaryPlayerAction = () => {
+    if (buffering.active) {
+      void stop()
+      return
+    }
+
+    if (isPlaying) {
+      void (isPaused ? play() : pause())
+      return
+    }
+
+    void play()
+  }
 
   const player = (
-    <div
-      className={`${
-        isCompactHeight ? 'sticky bottom-4' : 'fixed bottom-6'
-      } inset-x-0 z-50 flex justify-center px-4`}
-    >
-      <div className="w-full max-w-180 flex flex-col gap-3">
-        {buffering.active && (
-          <div
-            className={`rounded-3xl border backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.32)] px-5 py-4 ${playerTheme.shell}`}
-          >
-            <div className="flex items-start gap-4">
-              <div
-                className={`mt-0.5 h-10 w-10 rounded-full border flex items-center justify-center ${
-                  playerTheme.iconButton
-                }`}
-                aria-hidden="true"
-              >
-                <FiLoader className="animate-spin text-base" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold tracking-[0.2em] uppercase opacity-70">
-                      {buffering.label}
-                    </div>
-                    <p className="mt-1 text-sm opacity-85 max-w-2xl">{buffering.detail}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className={`text-lg font-semibold ${playerTheme.statusValue}`}>
-                      {bufferingPercent}%
-                    </div>
-                    <div className={`text-[11px] ${playerTheme.statusLabel}`}>
-                      {bufferingReadyLabel}
-                    </div>
-                  </div>
-                </div>
-                <div className={`mt-3 h-2 rounded-full overflow-hidden ${playerTheme.separator}`}>
-                  <div
-                    className={`h-full rounded-full transition-[width] duration-500 ease-out ${readerTheme.progressFill}`}
-                    style={{ width: `${Math.max(6, bufferingPercent)}%` }}
-                  />
-                </div>
-                {isPreparingNarration && (
-                  <p className={`mt-2 text-xs ${playerTheme.statusLabel}`}>
-                    First start is a little slower so the rest of the narration can stay smooth.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        <div
-          className={`w-full backdrop-blur-2xl border shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-all ${playerTheme.shell} ${
-            isCompactHeight
-              ? 'rounded-2xl px-4 py-2 flex items-center gap-3'
-              : 'rounded-full pl-4 pr-6 py-3 flex items-center gap-4'
-          }`}
-        >
-          <Tooltip label={primaryPlayerLabel}>
-          <button
-            onClick={primaryPlayerAction}
-            className={`rounded-full flex items-center justify-center shadow-lg transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ${
-              playerTheme.button
-            } ${isCompactHeight ? 'w-10 h-10' : 'w-12 h-12'}`}
-            aria-label={primaryPlayerLabel}
-            aria-pressed={isPlaying && !isPaused && !buffering.active}
-          >
-            {buffering.active ? (
-              <FiLoader className={`${isCompactHeight ? 'text-base' : 'text-xl'} animate-spin`} />
-            ) : isPlaying && !isPaused ? (
-              <FiPause className={isCompactHeight ? 'text-base' : 'text-xl'} />
-            ) : (
-              <FiPlay className={isCompactHeight ? 'text-base' : 'text-xl'} />
-            )}
-          </button>
-          </Tooltip>
-
-          <div
-            className={`flex flex-col gap-1 flex-1 min-w-30 ${
-              isCompactHeight ? 'max-w-40' : 'max-w-55'
-            }`}
-          >
-            <div className="h-6 flex items-center gap-1 opacity-50">
-              {PLAYER_WAVEFORM_HEIGHTS.map((height, i) => (
-                <div
-                  key={i}
-                  className={`w-1 ${playerTheme.wave} rounded-full transition-all duration-300 ${
-                    isPlaying && !isPaused && !buffering.active ? 'animate-pulse' : ''
-                  }`}
-                  style={{ height: `${height}px` }}
-                ></div>
-              ))}
-            </div>
-          </div>
-
-          <div
-            className={`flex items-center gap-3 ${
-              isCompactHeight
-                ? `border-l pl-3 ${playerTheme.separator}`
-                : `border-l pl-4 ${playerTheme.separator}`
-            }`}
-          >
-            <div className="text-xs">
-              <div className={playerTheme.statusLabel}>Status</div>
-              <div className={`font-mono ${playerTheme.statusValue}`}>
-                {buffering.active ? `${bufferingPercent}% ready` : status}
-              </div>
-            </div>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <Tooltip label="Jump to current highlighted passage">
-              <button
-                onClick={handleJumpToHighlight}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Jump to current highlighted passage"
-              >
-                <FiCrosshair className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Appearance settings">
-              <button
-                onClick={() => setIsAppearanceOpen(!isAppearanceOpen)}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Open appearance settings"
-              >
-                <FiSliders className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Table of contents">
-              <button
-                onClick={() => setIsTocOpen(!isTocOpen)}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Toggle table of contents"
-              >
-                <FiList className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Previous page">
-              <button
-                onClick={handlePrevPage}
-                disabled={visualPageIndex === 0}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Previous page"
-              >
-                <FiChevronLeft className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Next page">
-              <button
-                onClick={handleNextPage}
-                disabled={visualPageIndex >= totalPages - 1}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Next page"
-              >
-                <FiChevronRight className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Stop playback">
-              <button
-                onClick={stop}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
-                aria-label="Stop playback"
-              >
-                <FiStopCircle className="text-sm" />
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ReaderPlayer
+      buffering={buffering}
+      isPlaying={isPlaying}
+      isPaused={isPaused}
+      status={status}
+      isCompactHeight={isCompactHeight}
+      playerTheme={playerTheme}
+      progressFillClassName={readerTheme.progressFill}
+      canGoPrev={visualPageIndex > 0}
+      canGoNext={visualPageIndex < totalPages - 1}
+      onPrimaryAction={handlePrimaryPlayerAction}
+      onJumpToHighlight={handleJumpToHighlight}
+      onToggleAppearance={() => setIsAppearanceOpen((current) => !current)}
+      onToggleToc={() => setIsTocOpen((current) => !current)}
+      onPrevPage={handlePrevPage}
+      onNextPage={handleNextPage}
+      onStop={() => void stop()}
+    />
   )
 
   return (
