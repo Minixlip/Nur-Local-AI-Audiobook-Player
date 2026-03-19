@@ -1083,22 +1083,27 @@ export function useAudioPlayer({
       firstBatch && firstBatch.text !== '[[[IMAGE]]]'
         ? buildCacheKey(firstBatch.text, engine, voicePath, speed, xttsQuality)
         : null
+    let firstBatchCached = false
+
+    if (firstBatchCacheKey) {
+      if (audioCacheRef.current.has(firstBatchCacheKey)) {
+        firstBatchCached = true
+      } else if (audioCacheDbRef.current) {
+        const diskHit = await getCachedAudioFromDisk(audioCacheDbRef.current, firstBatchCacheKey)
+        if (diskHit) {
+          setCache(firstBatchCacheKey, diskHit)
+          firstBatchCached = true
+        }
+      }
+    }
 
     let shouldStreamFirstBatch =
       supportsFirstBatchStreaming &&
       firstBatch?.text !== '[[[IMAGE]]]' &&
       firstBatch?.globalIndices.length === 1
 
-    if (shouldStreamFirstBatch && firstBatchCacheKey) {
-      if (audioCacheRef.current.has(firstBatchCacheKey)) {
-        shouldStreamFirstBatch = false
-      } else if (audioCacheDbRef.current) {
-        const diskHit = await getCachedAudioFromDisk(audioCacheDbRef.current, firstBatchCacheKey)
-        if (diskHit) {
-          setCache(firstBatchCacheKey, diskHit)
-          shouldStreamFirstBatch = false
-        }
-      }
+    if (shouldStreamFirstBatch && firstBatchCached) {
+      shouldStreamFirstBatch = false
     }
 
     const streamFirstBatch = async (batch: AudioBatch) => {
@@ -1320,7 +1325,21 @@ export function useAudioPlayer({
       updateBufferingUi(0, engine === 'chatterbox' && xttsBufferTargets ? xttsBufferTargets.initialSeconds : 1)
       const firstBatchStreamPromise = shouldStreamFirstBatch ? streamFirstBatch(batches[0]) : null
       if (engine === 'chatterbox' && xttsBufferTargets) {
-        await ensureReadyAudio(shouldStreamFirstBatch ? 1 : 0, xttsBufferTargets.initialSeconds)
+        const startupTargetIndex = shouldStreamFirstBatch
+          ? 1
+          : firstBatchCached && firstBatch?.text !== '[[[IMAGE]]]'
+            ? 1
+            : 0
+
+        if (startupTargetIndex > 0 && batches.length > 0 && !audioPromises[0]) {
+          triggerGeneration(0)
+        }
+
+        await ensureReadyAudio(startupTargetIndex, xttsBufferTargets.initialSeconds)
+
+        if (startupTargetIndex > 0 && audioPromises[0]) {
+          await audioPromises[0]
+        }
       } else {
         triggerUpTo((shouldStreamFirstBatch ? 1 : 0) + bufferSize)
 
@@ -1358,7 +1377,7 @@ export function useAudioPlayer({
         }
 
         if (engine === 'chatterbox' && xttsBufferTargets) {
-          void ensureReadyAudio(i, xttsBufferTargets.steadySeconds)
+          void ensureReadyAudio(i + 1, xttsBufferTargets.steadySeconds)
         }
 
         try {
