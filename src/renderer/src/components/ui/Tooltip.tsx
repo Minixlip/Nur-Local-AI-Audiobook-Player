@@ -1,15 +1,19 @@
 import { ReactElement, cloneElement, useId } from 'react'
 
+type TooltipSide = 'top' | 'bottom'
+
 type TooltipProps = {
   label: string
   children: ReactElement
   className?: string
+  side?: TooltipSide
 }
 
 export default function Tooltip({
   label,
   children,
-  className
+  className,
+  side = 'top'
 }: TooltipProps): React.JSX.Element {
   const id = useId()
 
@@ -18,7 +22,7 @@ export default function Tooltip({
       {cloneElement(children as ReactElement<any>, {
         'aria-describedby': id
       })}
-      <span id={id} role="tooltip" className="tooltip-content">
+      <span id={id} role="tooltip" className={`tooltip-content tooltip-content-${side}`}>
         {label}
       </span>
     </span>

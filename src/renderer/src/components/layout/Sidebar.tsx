@@ -62,7 +62,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps): 
           )}
         </div>
 
-        <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} side="bottom">
           <button
             onClick={onToggleCollapse}
             className={`flex items-center justify-center rounded-full border text-zinc-100 shadow-[0_12px_26px_rgba(0,0,0,0.22)] transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${

@@ -309,6 +309,7 @@ export default function Reader(): React.JSX.Element {
 
   const playerTheme = getPlayerTheme(settings.theme)
   const readerTheme = getReaderTheme(settings.theme)
+  const shouldShowPlayer = Boolean(activeBook) && !isTocOpen && !isAppearanceOpen
 
   const pagePercent = totalPages > 0 ? ((visualPageIndex + 1) / totalPages) * 100 : 0
   const handlePrimaryPlayerAction = () => {
@@ -377,7 +378,9 @@ export default function Reader(): React.JSX.Element {
         ) : error ? (
           <div className="flex h-full items-center justify-center text-red-400">{error}</div>
         ) : (
-          <div className="relative z-10 px-4 pb-48 pt-4 md:px-8">
+            <div
+              className={`relative z-10 px-4 pt-4 md:px-8 ${shouldShowPlayer ? 'pb-48' : 'pb-10'}`}
+            >
             <div
               className={`sticky top-4 z-20 mx-auto mb-6 max-w-[1180px] rounded-[28px] border backdrop-blur-2xl ${readerTheme.hud}`}
             >
@@ -432,12 +435,12 @@ export default function Reader(): React.JSX.Element {
             <div className={`mt-8 pb-10 text-center text-xs ${readerTheme.meta}`}>
               Page {visualPageIndex + 1} of {totalPages}
             </div>
-            {activeBook && isCompactHeight ? player : null}
+            {shouldShowPlayer && isCompactHeight ? player : null}
           </div>
         )}
       </div>
 
-      {activeBook && !isCompactHeight ? player : null}
+      {shouldShowPlayer && !isCompactHeight ? player : null}
     </div>
   )
 }

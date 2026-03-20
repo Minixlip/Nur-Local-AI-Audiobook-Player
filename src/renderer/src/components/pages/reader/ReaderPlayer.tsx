@@ -72,6 +72,7 @@ export function ReaderPlayer({
     : isPlaying && !isPaused
       ? 'Pause playback'
       : 'Start playback'
+  const secondaryButtonSize = isCompactHeight ? 'h-9 w-9' : 'h-8 w-8 lg:h-9 lg:w-9'
 
   return (
     <div
@@ -128,7 +129,7 @@ export function ReaderPlayer({
           className={`w-full backdrop-blur-2xl border shadow-[0_20px_60px_rgba(0,0,0,0.45)] transition-all ${playerTheme.shell} ${
             isCompactHeight
               ? 'rounded-2xl px-4 py-2 flex items-center gap-3'
-              : 'rounded-full pl-4 pr-6 py-3 flex items-center gap-4'
+              : 'rounded-[2rem] px-4 py-3 flex flex-wrap items-center gap-3 lg:rounded-full lg:flex-nowrap lg:gap-4 lg:pl-4 lg:pr-6'
           }`}
         >
           <Tooltip label={primaryPlayerLabel}>
@@ -151,8 +152,8 @@ export function ReaderPlayer({
           </Tooltip>
 
           <div
-            className={`flex flex-col gap-1 flex-1 min-w-30 ${
-              isCompactHeight ? 'max-w-40' : 'max-w-55'
+            className={`flex-col gap-1 flex-1 min-w-30 ${
+              isCompactHeight ? 'flex max-w-40' : 'hidden lg:flex max-w-55'
             }`}
           >
             <div className="h-6 flex items-center gap-1 opacity-50">
@@ -172,7 +173,7 @@ export function ReaderPlayer({
             className={`flex items-center gap-3 ${
               isCompactHeight
                 ? `border-l pl-3 ${playerTheme.separator}`
-                : `border-l pl-4 ${playerTheme.separator}`
+                : `order-3 w-full justify-between border-t pt-3 lg:order-none lg:w-auto lg:justify-start lg:border-t-0 lg:border-l lg:pl-4 lg:pt-0 ${playerTheme.separator}`
             }`}
           >
             <div className="text-xs">
@@ -183,11 +184,15 @@ export function ReaderPlayer({
             </div>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div
+            className={`flex items-center justify-end gap-1.5 sm:gap-2 ${
+              isCompactHeight ? 'ml-auto' : 'ml-auto flex-wrap'
+            }`}
+          >
             <Tooltip label="Jump to current highlighted passage">
               <button
                 onClick={onJumpToHighlight}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Jump to current highlighted passage"
               >
                 <FiCrosshair className="text-sm" />
@@ -196,7 +201,7 @@ export function ReaderPlayer({
             <Tooltip label="Appearance settings">
               <button
                 onClick={onToggleAppearance}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Open appearance settings"
               >
                 <FiSliders className="text-sm" />
@@ -205,7 +210,7 @@ export function ReaderPlayer({
             <Tooltip label="Table of contents">
               <button
                 onClick={onToggleToc}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Toggle table of contents"
               >
                 <FiList className="text-sm" />
@@ -215,7 +220,7 @@ export function ReaderPlayer({
               <button
                 onClick={onPrevPage}
                 disabled={!canGoPrev}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Previous page"
               >
                 <FiChevronLeft className="text-sm" />
@@ -225,7 +230,7 @@ export function ReaderPlayer({
               <button
                 onClick={onNextPage}
                 disabled={!canGoNext}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center disabled:opacity-40 hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Next page"
               >
                 <FiChevronRight className="text-sm" />
@@ -234,7 +239,7 @@ export function ReaderPlayer({
             <Tooltip label="Stop playback">
               <button
                 onClick={onStop}
-                className={`h-9 w-9 rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
+                className={`${secondaryButtonSize} rounded-full border transition flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0 ${playerTheme.iconButton}`}
                 aria-label="Stop playback"
               >
                 <FiStopCircle className="text-sm" />
