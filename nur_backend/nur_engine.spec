@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 backend_dir = Path.cwd()
 datas = []
@@ -33,11 +33,13 @@ for package_name in (
     hiddenimports += tmp_ret[2]
 
 datas += [(str(backend_dir / 'default_speaker.wav'), '.')]
+datas += collect_data_files('nur_tts_backend')
+hiddenimports += collect_submodules('nur_tts_backend')
 
 
 a = Analysis(
     ['server.py'],
-    pathex=[],
+    pathex=[str(backend_dir)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

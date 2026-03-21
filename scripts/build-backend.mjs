@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -12,11 +13,13 @@ const syncedBackendDir = path.join(backendDir, 'nur_engine')
 const defaultSpeakerPath = path.join(backendDir, 'default_speaker.wav')
 const platform = process.platform
 const arch = process.arch
+const buildMetaFilename = 'build-meta.json'
 
 const backendBinaryName = platform === 'win32' ? 'nur_engine.exe' : 'nur_engine'
 const builtBinaryPath = path.join(buildWorkDir, 'nur_engine', backendBinaryName)
 const expectedBinaryPath = path.join(distDir, backendBinaryName)
-const buildMetaPath = path.join(distDir, 'build-meta.json')
+const buildMetaPath = path.join(distDir, buildMetaFilename)
+const syncedBuildMetaPath = path.join(syncedBackendDir, buildMetaFilename)
 const syncedBackendBinaryPath = path.join(syncedBackendDir, backendBinaryName)
 const requirementsPath = path.join(backendDir, 'requirements.txt')
 const platformRequirementsPath = path.join(
@@ -89,6 +92,79 @@ const readBuildMeta = () => {
   }
 }
 
+const shouldHashBackendFile = (relativePath) => {
+  const normalized = relativePath.replace(/\\/g, '/')
+
+  if (
+    normalized.startsWith('dist/') ||
+    normalized.startsWith('build/') ||
+    normalized.startsWith('nur_engine/') ||
+    normalized.startsWith('__pycache__/')
+  ) {
+    return false
+  }
+
+  if (normalized.startsWith('.build-env-')) {
+    return false
+  }
+
+  return (
+    normalized.endsWith('.py') ||
+    normalized.endsWith('.spec') ||
+    normalized.endsWith('.txt') ||
+    normalized.endsWith('.wav')
+  )
+}
+
+const collectBackendSourceFiles = (directory, base = directory) => {
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+  const files = []
+
+  for (const entry of entries) {
+    const fullPath = path.join(directory, entry.name)
+    const relativePath = path.relative(base, fullPath)
+
+    if (entry.isDirectory()) {
+      if (
+        entry.name === 'dist' ||
+        entry.name === 'build' ||
+        entry.name === 'nur_engine' ||
+        entry.name === '__pycache__' ||
+        entry.name.startsWith('.build-env-')
+      ) {
+        continue
+      }
+      files.push(...collectBackendSourceFiles(fullPath, base))
+      continue
+    }
+
+    if (shouldHashBackendFile(relativePath)) {
+      files.push(fullPath)
+    }
+  }
+
+  return files
+}
+
+const backendSourceHash = () => {
+  const hash = createHash('sha256')
+  const files = collectBackendSourceFiles(backendDir).sort((left, right) =>
+    left.localeCompare(right)
+  )
+
+  for (const filePath of files) {
+    const relativePath = path.relative(backendDir, filePath).replace(/\\/g, '/')
+    hash.update(relativePath)
+    hash.update('\n')
+    hash.update(fs.readFileSync(filePath))
+    hash.update('\n')
+  }
+
+  return hash.digest('hex')
+}
+
+const sourceHash = backendSourceHash()
+
 const writeBuildMeta = (pythonVersion) => {
   fs.mkdirSync(distDir, { recursive: true })
   fs.writeFileSync(
@@ -97,7 +173,8 @@ const writeBuildMeta = (pythonVersion) => {
       {
         platform,
         arch,
-        pythonVersion
+        pythonVersion,
+        sourceHash
       },
       null,
       2
@@ -153,20 +230,15 @@ const existingBuildMeta = readBuildMeta()
 if (fs.existsSync(expectedBinaryPath) && process.env.NUR_BACKEND_REBUILD !== '1') {
   if (
     existingBuildMeta?.platform === platform &&
-    existingBuildMeta?.arch === arch
+    existingBuildMeta?.arch === arch &&
+    existingBuildMeta?.sourceHash === sourceHash
   ) {
     log(`Reusing existing backend build: ${expectedBinaryPath}`)
     process.exit(0)
   }
 
-  if (!existingBuildMeta && platform === 'win32') {
-    log(`Adopting legacy Windows backend build: ${expectedBinaryPath}`)
-    writeBuildMeta('legacy')
-    process.exit(0)
-  }
-
   log(
-    `Discarding mismatched backend build metadata (${existingBuildMeta?.platform || 'unknown'}/${existingBuildMeta?.arch || 'unknown'}) for ${platform}/${arch}.`
+    `Discarding stale backend build metadata (${existingBuildMeta?.platform || 'unknown'}/${existingBuildMeta?.arch || 'unknown'} / ${existingBuildMeta?.sourceHash || 'missing'}) for ${platform}/${arch}.`
   )
 }
 
@@ -174,14 +246,25 @@ if (
   platform === 'win32' &&
   !fs.existsSync(expectedBinaryPath) &&
   fs.existsSync(syncedBackendBinaryPath) &&
+  fs.existsSync(syncedBuildMetaPath) &&
   process.env.NUR_BACKEND_REBUILD !== '1'
 ) {
-  log(`Restoring backend build output from ${syncedBackendDir}`)
-  fs.rmSync(distDir, { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(distDir), { recursive: true })
-  fs.cpSync(syncedBackendDir, distDir, { recursive: true })
-  writeBuildMeta('legacy')
-  process.exit(0)
+  try {
+    const syncedMeta = JSON.parse(fs.readFileSync(syncedBuildMetaPath, 'utf-8'))
+    if (
+      syncedMeta?.platform === platform &&
+      syncedMeta?.arch === arch &&
+      syncedMeta?.sourceHash === sourceHash
+    ) {
+      log(`Restoring backend build output from ${syncedBackendDir}`)
+      fs.rmSync(distDir, { recursive: true, force: true })
+      fs.mkdirSync(path.dirname(distDir), { recursive: true })
+      fs.cpSync(syncedBackendDir, distDir, { recursive: true })
+      process.exit(0)
+    }
+  } catch {
+    log(`Ignoring unreadable synced backend metadata at ${syncedBuildMetaPath}`)
+  }
 }
 
 const python = resolveSystemPython()

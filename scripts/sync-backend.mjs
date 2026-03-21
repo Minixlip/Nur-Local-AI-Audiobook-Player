@@ -8,6 +8,7 @@ const backendBinaryName = process.env.NUR_BACKEND_BINARY_NAME || (isWindows ? 'n
 const sourceRoot = process.env.NUR_BACKEND_SOURCE_DIR || path.join(root, 'nur_backend', 'dist')
 const targetRoot = path.join(root, 'nur_backend', 'nur_engine')
 const defaultSpeaker = path.join(root, 'nur_backend', 'default_speaker.wav')
+const buildMetaFilename = 'build-meta.json'
 
 const log = (message) => {
   console.log(`[backend:sync] ${message}`)
@@ -52,6 +53,19 @@ if (sourceStats.isDirectory()) {
   fs.cpSync(source, targetRoot, { recursive: true })
 } else {
   fs.copyFileSync(source, path.join(targetRoot, backendBinaryName))
+}
+
+const sourceBuildMeta = path.join(sourceRoot, 'nur_engine', buildMetaFilename)
+const sourceRootBuildMeta = path.join(sourceRoot, buildMetaFilename)
+const buildMetaSource = fs.existsSync(sourceBuildMeta)
+  ? sourceBuildMeta
+  : fs.existsSync(sourceRootBuildMeta)
+    ? sourceRootBuildMeta
+    : null
+
+if (buildMetaSource) {
+  fs.copyFileSync(buildMetaSource, path.join(targetRoot, buildMetaFilename))
+  log('Copied build-meta.json')
 }
 
 if (fs.existsSync(defaultSpeaker)) {
