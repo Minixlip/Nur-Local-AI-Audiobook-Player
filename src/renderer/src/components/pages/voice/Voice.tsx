@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useReaderSettings } from '../../../hooks/useReaderSettings'
+import { getAppTheme } from '../../../theme/appTheme'
 import { getStoredTtsEngine, TTS_ENGINE_CHANGED_EVENT, type TtsEngine } from '../../../utils/tts'
 
 type VoiceSample = {
@@ -11,6 +13,8 @@ type VoiceSample = {
 
 export default function Voice() {
   const [engine, setEngine] = useState<TtsEngine>(getStoredTtsEngine())
+  const { settings } = useReaderSettings()
+  const theme = getAppTheme(settings.theme)
   const [customVoicePath, setCustomVoicePath] = useState<string | null>(null)
   const [voiceLibrary, setVoiceLibrary] = useState<VoiceSample[]>([])
   const [pendingVoicePath, setPendingVoicePath] = useState<string | null>(null)
@@ -84,18 +88,18 @@ export default function Voice() {
   }
 
   return (
-    <div className="p-8 text-white h-full overflow-y-auto">
+    <div className={`p-8 h-full overflow-y-auto ${theme.body}`}>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Voice Studio</h1>
-        <p className="text-zinc-400 mt-1">Manage your cloning presets and voice profiles.</p>
+        <h1 className={`text-3xl font-bold ${theme.title}`}>Voice Studio</h1>
+        <p className={`mt-1 ${theme.muted}`}>Manage your cloning presets and voice profiles.</p>
       </div>
 
       {engine === 'piper' ? (
-        <div className="p-5 bg-white/5 text-zinc-200 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
+        <div className={`p-5 rounded-2xl border backdrop-blur-xl ${theme.card}`}>
           You are currently using <strong>Piper TTS</strong>. Custom voice cloning is only
           available with <strong>Chatterbox</strong>.
           <div className="mt-3">
-            <Link to="/settings" className="underline hover:text-white">
+            <Link to="/settings" className={`underline ${theme.link}`}>
               Switch engine in Settings
             </Link>
           </div>
@@ -103,30 +107,30 @@ export default function Voice() {
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-            <div className="bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] self-start">
-              <h2 className="text-xl font-bold mb-2">Add Voice Sample</h2>
-              <p className="text-zinc-400 text-sm mb-6">
+            <div className={`p-6 rounded-2xl border backdrop-blur-xl self-start ${theme.card}`}>
+              <h2 className={`text-xl font-bold mb-2 ${theme.title}`}>Add Voice Sample</h2>
+              <p className={`text-sm mb-6 ${theme.muted}`}>
                 Upload a 6-10 second WAV file. Name it and reuse it anytime.
               </p>
 
               <div className="flex flex-col gap-4">
                 <button
                   onClick={handleUpload}
-                  className="w-full py-4 border-2 border-dashed border-white/10 rounded-xl hover:border-white/30 hover:bg-white/5 transition-all flex flex-col items-center justify-center gap-2"
+                  className={`w-full py-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center gap-2 ${theme.secondaryButton}`}
                 >
                   <span className="text-2xl">+</span>
                   <span className="font-semibold">Upload Voice Sample</span>
                 </button>
 
                 {customVoicePath && (
-                  <div className="bg-black/20 p-3 rounded-xl border border-white/10 flex items-center justify-between gap-3">
+                  <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${theme.insetCard}`}>
                     <div className="overflow-hidden">
-                      <div className="text-xs text-zinc-400 uppercase font-bold">Active voice</div>
-                      <div className="text-sm truncate text-zinc-200" title={customVoicePath}>
+                      <div className={`text-xs uppercase font-bold ${theme.muted}`}>Active voice</div>
+                      <div className={`text-sm truncate ${theme.body}`} title={customVoicePath}>
                         {customVoicePath.split(/[/\\]/).pop()}
                       </div>
                     </div>
-                    <span className="text-[11px] text-emerald-300/80 uppercase tracking-wide">
+                    <span className={`text-[11px] uppercase tracking-wide ${theme.accentText}`}>
                       In use
                     </span>
                   </div>
@@ -134,14 +138,14 @@ export default function Voice() {
               </div>
             </div>
 
-            <div className="bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
+            <div className={`p-6 rounded-2xl border backdrop-blur-xl ${theme.card}`}>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Your Voice Library</h2>
-                <span className="text-xs text-zinc-400">{voiceLibrary.length} samples</span>
+                <h2 className={`text-xl font-bold ${theme.title}`}>Your Voice Library</h2>
+                <span className={`text-xs ${theme.muted}`}>{voiceLibrary.length} samples</span>
               </div>
 
               {voiceLibrary.length === 0 ? (
-                <div className="text-sm text-zinc-400 bg-black/20 border border-white/10 rounded-xl p-4">
+                <div className={`text-sm rounded-xl p-4 border ${theme.insetCard}`}>
                   No saved voices yet. Upload a voice sample to build your library.
                 </div>
               ) : (
@@ -151,45 +155,47 @@ export default function Voice() {
                     return (
                       <div
                         key={sample.id}
-                        className={`rounded-xl border p-4 bg-black/20 transition-all ${
-                          isActive ? 'border-emerald-400/40 shadow-lg' : 'border-white/10'
+                        className={`rounded-xl border p-4 transition-all ${
+                          isActive
+                            ? `${theme.insetCard} ${theme.accentOutline}`
+                            : theme.insetCard
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="overflow-hidden">
-                            <div className="text-xs text-zinc-400 uppercase font-semibold">
+                            <div className={`text-xs uppercase font-semibold ${theme.muted}`}>
                               Voice Sample
                             </div>
-                            <div className="text-base text-zinc-200 font-semibold truncate">
+                            <div className={`text-base font-semibold truncate ${theme.title}`}>
                               {sample.name}
                             </div>
                             <div
-                              className="text-xs text-zinc-500 mt-1 truncate"
+                              className={`text-xs mt-1 truncate ${theme.subtle}`}
                               title={sample.path}
                             >
                               {sample.path.split(/[/\\]/).pop()}
                             </div>
                           </div>
                           {isActive && (
-                            <span className="text-[10px] text-emerald-300/80 uppercase tracking-wide">
+                            <span className={`text-[10px] uppercase tracking-wide ${theme.accentText}`}>
                               Active
                             </span>
                           )}
                         </div>
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
                           <button
                             onClick={() => handleSelectVoice(sample)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                               isActive
-                                ? 'bg-emerald-400/10 text-emerald-200 border-emerald-300/30'
-                                : 'bg-white/5 text-zinc-200 border-white/10 hover:bg-white/10'
+                                ? theme.accentPill
+                                : theme.secondaryButton
                             }`}
                           >
                             {isActive ? 'Selected' : 'Use Voice'}
                           </button>
                           <button
                             onClick={() => handleRemoveVoice(sample)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-white/10 text-zinc-300 hover:bg-red-500/20 hover:text-white transition"
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${theme.secondaryButton}`}
                           >
                             Remove
                           </button>
@@ -203,34 +209,34 @@ export default function Voice() {
           </div>
 
           {pendingVoicePath && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/80 p-6 shadow-[0_25px_60px_rgba(0,0,0,0.5)]">
-              <h3 className="text-lg font-semibold text-zinc-100">Name this voice</h3>
-              <p className="text-sm text-zinc-400 mt-1">
+          <div className={`fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm px-4 ${theme.dialogBackdrop}`}>
+            <div className={`w-full max-w-md rounded-2xl border p-6 shadow-[0_25px_60px_rgba(0,0,0,0.5)] ${theme.dialogCard}`}>
+              <h3 className={`text-lg font-semibold ${theme.title}`}>Name this voice</h3>
+              <p className={`text-sm mt-1 ${theme.muted}`}>
                 Give this sample a short, memorable name.
               </p>
               <div className="mt-4">
-                <label className="text-xs text-zinc-400 uppercase tracking-wide">Voice name</label>
+                <label className={`text-xs uppercase tracking-wide ${theme.muted}`}>Voice name</label>
                 <input
                   value={pendingVoiceName}
                   onChange={(event) => setPendingVoiceName(event.target.value)}
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-white/30"
+                  className={`mt-2 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${theme.input}`}
                   placeholder="Studio Voice"
                 />
-                <div className="text-xs text-zinc-500 mt-2 truncate">
+                <div className={`text-xs mt-2 truncate ${theme.subtle}`}>
                   {pendingVoicePath.split(/[/\\]/).pop()}
                 </div>
               </div>
               <div className="mt-6 flex items-center justify-end gap-3">
                 <button
                   onClick={handleCancelVoice}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold border border-white/10 text-zinc-300 hover:bg-white/5 transition"
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition ${theme.secondaryButton}`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSaveVoice}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-white text-black hover:bg-zinc-200 transition"
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition ${theme.primaryButton}`}
                 >
                   Save Voice
                 </button>

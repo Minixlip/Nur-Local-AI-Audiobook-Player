@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { HashRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
+import { useReaderSettings } from './hooks/useReaderSettings'
 import { useTtsStatus } from './hooks/useTtsStatus'
 import { useRuntimeStatus } from './hooks/useRuntimeStatus'
+import { getAppTheme } from './theme/appTheme'
 import { getModelStatusForEngine, isEngineReady, setStoredTtsEngine } from './utils/tts'
 
 /* Pages */
@@ -66,6 +68,8 @@ function AppFrame({
   onRevealLogs,
   onUsePiper
 }: AppFrameProps): React.JSX.Element {
+  const { settings } = useReaderSettings()
+  const theme = getAppTheme(settings.theme)
   const location = useLocation()
   const meta =
     routeMeta[location.pathname] ||
@@ -141,36 +145,34 @@ function AppFrame({
   const hasOverlayActions = showRetryAction || showRevealLogs || showOpenSettings || showPiperShortcut
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-[#08090c] text-zinc-100">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(148,163,184,0.08),transparent_30%),linear-gradient(180deg,rgba(10,10,12,0.92),rgba(6,7,10,1))]" />
-      <div className="pointer-events-none absolute -top-24 left-1/2 h-[420px] w-[620px] -translate-x-1/2 rounded-full bg-white/[0.08] blur-[140px]" />
-      <div className="pointer-events-none absolute -bottom-48 right-[-8%] h-[420px] w-[520px] rounded-full bg-slate-500/10 blur-[140px]" />
+    <div className={`relative flex h-screen overflow-hidden ${theme.shell}`}>
+      <div className={`pointer-events-none absolute inset-0 ${theme.shellBackdrop}`} />
+      <div
+        className={`pointer-events-none absolute -top-24 left-1/2 h-[420px] w-[620px] -translate-x-1/2 rounded-full blur-[140px] ${theme.shellGlowPrimary}`}
+      />
+      <div
+        className={`pointer-events-none absolute -bottom-48 right-[-8%] h-[420px] w-[520px] rounded-full blur-[140px] ${theme.shellGlowSecondary}`}
+      />
 
       <div className="relative z-10 flex h-full w-full">
         <Sidebar collapsed={collapsed} onToggleCollapse={onToggleSidebar} />
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden border-l border-white/[0.08] bg-white/[0.03] backdrop-blur-2xl">
+        <main className={`flex min-w-0 flex-1 flex-col overflow-hidden border-l ${theme.mainPanel}`}>
           {!isReaderRoute && (
-            <header className="flex items-center justify-between border-b border-white/[0.08] px-6 py-4 lg:px-8">
+            <header className={`flex items-center justify-between border-b px-6 py-4 lg:px-8 ${theme.headerBorder}`}>
               <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Nur</div>
+                <div className={`text-[11px] uppercase tracking-[0.35em] ${theme.eyebrow}`}>Nur</div>
                 <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h1 className="text-lg font-semibold text-zinc-50">{meta.title}</h1>
-                  <p className="text-sm text-zinc-400">{meta.description}</p>
+                  <h1 className={`text-lg font-semibold ${theme.title}`}>{meta.title}</h1>
+                  <p className={`text-sm ${theme.muted}`}>{meta.description}</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em]">
-                <div
-                  className={`rounded-full border px-3 py-1.5 ${
-                    backendOk
-                      ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200'
-                      : 'border-amber-400/20 bg-amber-400/10 text-amber-100'
-                  }`}
-                >
+                <div className={`rounded-full border px-3 py-1.5 ${backendOk ? theme.readyBadge : theme.pendingBadge}`}>
                   {backendOk ? 'Engine ready' : 'Preparing engine'}
                 </div>
-                <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-zinc-300 md:block">
+                <div className={`hidden rounded-full border px-3 py-1.5 md:block ${theme.pill}`}>
                   {getEngineDisplayName(engine)}
                 </div>
               </div>
@@ -189,34 +191,34 @@ function AppFrame({
       </div>
 
       {!backendReady && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/82 backdrop-blur-2xl">
-          <div className="w-full max-w-[28rem] rounded-[2rem] border border-white/10 bg-[#17181d]/92 px-8 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/[0.03]">
+        <div className={`absolute inset-0 z-20 flex items-center justify-center backdrop-blur-2xl ${theme.overlayBackdrop}`}>
+          <div className={`w-full max-w-[28rem] rounded-[2rem] border px-8 py-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] ${theme.overlayCard}`}>
+            <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full border ${theme.softCard}`}>
               <div
                 className={`h-10 w-10 rounded-full border-2 ${
                   hasBackendIssue || hasModelIssue
-                    ? 'border-red-400/25 border-t-red-400'
-                    : 'border-white/15 border-t-emerald-300'
+                    ? theme.overlaySpinnerError
+                    : theme.overlaySpinnerIdle
                 } animate-spin`}
               />
             </div>
-            <div className="mt-6 text-[10px] uppercase tracking-[0.42em] text-zinc-500">Nur</div>
-            <div className="mt-3 text-[1.85rem] font-semibold leading-none text-zinc-50">
+            <div className={`mt-6 text-[10px] uppercase tracking-[0.42em] ${theme.eyebrow}`}>Nur</div>
+            <div className={`mt-3 text-[1.85rem] font-semibold leading-none ${theme.title}`}>
               {overlayTitle()}
             </div>
-            <div className="mt-4 text-sm leading-6 text-zinc-400">{overlayHint()}</div>
+            <div className={`mt-4 text-sm leading-6 ${theme.muted}`}>{overlayHint()}</div>
             {overlaySupportingCopy() && (
-              <div className="mt-2 text-sm leading-6 text-zinc-500">{overlaySupportingCopy()}</div>
+              <div className={`mt-2 text-sm leading-6 ${theme.subtle}`}>{overlaySupportingCopy()}</div>
             )}
             {diagnosticMessage && (
-              <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-xs leading-5 text-zinc-300">
+              <div className={`mt-5 rounded-2xl border px-4 py-3 text-left text-xs leading-5 ${theme.overlayMessage}`}>
                 {diagnosticMessage}
               </div>
             )}
             {isPreparingPiper && (
-              <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div className={`mt-6 h-1.5 w-full overflow-hidden rounded-full ${theme.overlayProgressTrack}`}>
                 <div
-                  className="h-full rounded-full bg-emerald-300 transition-all duration-300"
+                  className={`h-full rounded-full transition-all duration-300 ${theme.overlayProgressFill}`}
                   style={{ width: `${progress ?? 0}%` }}
                 />
               </div>
@@ -226,7 +228,7 @@ function AppFrame({
                 {showRetryAction && (
                   <button
                     onClick={onRetry}
-                    className="rounded-full border border-white/10 bg-white px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200"
+                    className={`rounded-full border px-5 py-2.5 text-sm font-semibold transition ${theme.primaryButton}`}
                   >
                     {hasBackendIssue ? 'Restart Engine' : 'Try Again'}
                   </button>
@@ -234,7 +236,7 @@ function AppFrame({
                 {showPiperShortcut && (
                   <button
                     onClick={onUsePiper}
-                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                    className={`rounded-full border px-5 py-2.5 text-sm font-semibold transition ${theme.secondaryButton}`}
                   >
                     Use Piper Instead
                   </button>
@@ -242,7 +244,7 @@ function AppFrame({
                 {showRevealLogs && (
                   <button
                     onClick={onRevealLogs}
-                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                    className={`rounded-full border px-5 py-2.5 text-sm font-semibold transition ${theme.secondaryButton}`}
                   >
                     Reveal Logs
                   </button>
@@ -250,7 +252,7 @@ function AppFrame({
                 {showOpenSettings && (
                   <Link
                     to="/settings"
-                    className="rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/15"
+                    className={`rounded-full border px-5 py-2.5 text-sm font-semibold transition ${theme.secondaryButton}`}
                   >
                     Open Settings
                   </Link>
@@ -258,12 +260,12 @@ function AppFrame({
               </div>
             )}
             {!diagnosticMessage && !isPreparingPiper && (
-              <div className="mt-6 text-xs tracking-[0.08em] text-zinc-500">
+              <div className={`mt-6 text-xs tracking-[0.08em] ${theme.subtle}`}>
                 This screen closes automatically when setup finishes.
               </div>
             )}
             {showDevVersion && (
-              <div className="mt-5 text-[11px] uppercase tracking-[0.2em] text-white/35">
+              <div className={`mt-5 text-[11px] uppercase tracking-[0.2em] ${theme.subtle}`}>
                 v{appVersion} dev
               </div>
             )}

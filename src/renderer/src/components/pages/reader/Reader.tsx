@@ -361,6 +361,7 @@ export default function Reader(): React.JSX.Element {
         isOpen={isTocOpen}
         onClose={() => setIsTocOpen(false)}
         currentVisualPage={visualPageIndex}
+        themeMode={settings.theme}
         onChapterClick={handleChapterClick}
       />
 

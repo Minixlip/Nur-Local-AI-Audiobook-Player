@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { PlaybackPreferences, PlaybackQualityMode } from '../../../hooks/usePlaybackPreferences'
+import { getAppTheme } from '../../../theme/appTheme'
 import Tooltip from '../../ui/Tooltip'
 
 type ReaderThemeMode = 'light' | 'sepia' | 'dark'
@@ -54,31 +55,32 @@ export function VoiceDeliverySection({
   onTtsSpeedChange,
   onPremiumQualityModeChange
 }: VoiceDeliverySectionProps) {
+  const chrome = getAppTheme(theme)
   const { lowEndMode, speechRate, qualityMode } = preferences
   const readingPaceLabel =
     speechRate < 0.95 ? 'Measured' : speechRate > 1.05 ? 'Brisk' : 'Natural'
 
   return (
-    <div className="bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] space-y-4">
+    <div className={`p-6 rounded-2xl border backdrop-blur-xl space-y-4 ${chrome.card}`}>
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-zinc-100">Voice Delivery</h2>
-          <p className="text-sm text-zinc-400 mt-1">
+          <h2 className={`text-xl font-semibold ${chrome.title}`}>Voice Delivery</h2>
+          <p className={`text-sm mt-1 ${chrome.muted}`}>
             Control pacing and how much {premiumEngineName} prioritizes natural phrasing over speed.
           </p>
         </div>
-        <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
+        <div className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${chrome.pill}`}>
           {readingPaceLabel}
         </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.3fr,1fr]">
-        <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4">
-          <div className="flex items-center justify-between text-sm text-zinc-200">
+        <div className={`rounded-xl border px-4 py-4 ${chrome.insetCard}`}>
+          <div className={`flex items-center justify-between text-sm ${chrome.body}`}>
             <span className="font-medium">Reading pace</span>
-            <span className="font-semibold text-zinc-100">{speechRate.toFixed(2)}x</span>
+            <span className={`font-semibold ${chrome.title}`}>{speechRate.toFixed(2)}x</span>
           </div>
-          <div className="mt-1 text-[11px] text-zinc-400">
+          <div className={`mt-1 text-[11px] ${chrome.muted}`}>
             `1.0x` is the natural baseline. Slower sounds calmer; faster feels more energetic.
           </div>
           <Tooltip label="Speech speed" className="w-full">
@@ -93,16 +95,16 @@ export function VoiceDeliverySection({
               style={getSliderStyle(theme, speechRate, MIN_TTS_SPEED, MAX_TTS_SPEED)}
             />
           </Tooltip>
-          <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-wide text-zinc-500">
+          <div className={`mt-3 flex items-center justify-between text-[11px] uppercase tracking-wide ${chrome.subtle}`}>
             <span>0.85x</span>
             <span>Natural</span>
             <span>1.15x</span>
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4">
-          <div className="text-sm font-medium text-zinc-200">{premiumEngineName} quality preset</div>
-          <div className="mt-1 text-[11px] text-zinc-400">
+        <div className={`rounded-xl border px-4 py-4 ${chrome.insetCard}`}>
+          <div className={`text-sm font-medium ${chrome.body}`}>{premiumEngineName} quality preset</div>
+          <div className={`mt-1 text-[11px] ${chrome.muted}`}>
             Studio uses larger batches and less aggressive startup optimization for more natural delivery.
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2">
@@ -127,15 +129,15 @@ export function VoiceDeliverySection({
                   onClick={() => onPremiumQualityModeChange(option.value)}
                   className={`rounded-2xl border px-4 py-3 text-left transition ${
                     active
-                      ? 'border-white/30 bg-white/10 shadow-[0_14px_30px_rgba(0,0,0,0.25)]'
-                      : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+                      ? `${chrome.card} ${chrome.selectionRing} shadow-[0_14px_30px_rgba(0,0,0,0.25)]`
+                      : `${chrome.insetCard} hover:brightness-[1.04]`
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold text-zinc-100">{option.label}</span>
-                    {active && <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />}
+                    <span className={`text-sm font-semibold ${chrome.title}`}>{option.label}</span>
+                    {active && <span className={`h-2.5 w-2.5 rounded-full ${chrome.accentDot}`} />}
                   </div>
-                  <div className="mt-2 text-[11px] leading-5 text-zinc-400">
+                  <div className={`mt-2 text-[11px] leading-5 ${chrome.muted}`}>
                     {option.description}
                   </div>
                 </button>
@@ -143,7 +145,7 @@ export function VoiceDeliverySection({
             })}
           </div>
           {lowEndMode && (
-            <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-[11px] text-amber-100">
+            <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] ${chrome.warningCallout}`}>
               Low-end mode is on, so playback will still favor stability over maximum {premiumEngineName} quality.
             </div>
           )}
@@ -172,21 +174,22 @@ export function PerformanceSection({
   onSteadyBufferChange,
   onCrossfadeChange
 }: PerformanceSectionProps) {
+  const chrome = getAppTheme(theme)
   const { lowEndMode, initialBuffer, steadyBuffer, crossfadeMs } = preferences
 
   return (
-    <div className="bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] space-y-4">
+    <div className={`p-6 rounded-2xl border backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] space-y-4 ${chrome.card}`}>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-zinc-100">Performance</h2>
-          <p className="text-sm text-zinc-400 mt-1">
+          <h2 className={`text-xl font-semibold ${chrome.title}`}>Performance</h2>
+          <p className={`text-sm mt-1 ${chrome.muted}`}>
             Reduce buffering on low-end devices by using smaller audio batches.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onResetPreferences}
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:bg-white/10"
+            className={`rounded-full border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${chrome.secondaryButton}`}
           >
             Reset Audio
           </button>
@@ -194,12 +197,12 @@ export function PerformanceSection({
             <button
               onClick={onLowEndToggle}
               className={`relative inline-flex h-7 w-14 items-center rounded-full border transition-all ${
-                lowEndMode ? 'bg-white/90 border-white/80' : 'bg-white/10 border-white/20'
+                lowEndMode ? chrome.toggleTrackOn : chrome.insetCard
               }`}
               aria-pressed={lowEndMode}
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-black transition-all ${
+                className={`inline-block h-5 w-5 transform rounded-full transition-all ${chrome.toggleThumb} ${
                   lowEndMode ? 'translate-x-7' : 'translate-x-1'
                 }`}
               />
@@ -208,44 +211,42 @@ export function PerformanceSection({
         </div>
       </div>
 
-      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3 gap-4">
+      <div className={`flex items-center justify-between rounded-xl border px-4 py-3 gap-4 ${chrome.insetCard}`}>
         <div>
-          <div className="text-sm font-semibold text-zinc-200">Low-end device mode</div>
-          <div className="text-xs text-zinc-400">
+          <div className={`text-sm font-semibold ${chrome.body}`}>Low-end device mode</div>
+          <div className={`text-xs ${chrome.muted}`}>
             Smaller chunks, steadier playback, slightly more pauses between segments.
           </div>
         </div>
         <div
           className={`text-xs font-semibold px-2 py-1 rounded-full border ${
-            lowEndMode
-              ? 'bg-emerald-400/10 text-emerald-200 border-emerald-300/30'
-              : 'bg-white/5 text-zinc-300 border-white/10'
+            lowEndMode ? chrome.accentPill : chrome.pill
           }`}
         >
           {lowEndMode ? 'Enabled' : 'Off'}
         </div>
       </div>
 
-      <details className="group rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+      <details className={`group rounded-2xl border px-4 py-3 ${chrome.insetCard}`}>
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-semibold text-zinc-200">Advanced buffering</div>
-            <div className="mt-1 text-[11px] text-zinc-400">
+            <div className={`text-sm font-semibold ${chrome.body}`}>Advanced buffering</div>
+            <div className={`mt-1 text-[11px] ${chrome.muted}`}>
               Fine-tune startup feel, continuity, and segment joins.
             </div>
           </div>
-          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition group-open:bg-white/10">
+          <div className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] transition group-open:brightness-[1.04] ${chrome.pill}`}>
             Expand
           </div>
         </summary>
 
         <div className="grid gap-4 pt-4">
-          <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="flex items-center justify-between text-sm text-zinc-200">
-              <span className="font-medium text-zinc-200">Initial buffer (segments)</span>
-              <span className="font-semibold text-zinc-100">{initialBuffer}</span>
+          <div className={`rounded-xl border px-4 py-3 ${chrome.insetCard}`}>
+            <div className={`flex items-center justify-between text-sm ${chrome.body}`}>
+              <span className="font-medium">Initial buffer (segments)</span>
+              <span className={`font-semibold ${chrome.title}`}>{initialBuffer}</span>
             </div>
-            <div className="text-[11px] text-zinc-400 mt-1">
+            <div className={`text-[11px] mt-1 ${chrome.muted}`}>
               How many segments load before playback starts.
             </div>
             <Tooltip label="Initial buffer size" className="w-full">
@@ -262,12 +263,12 @@ export function PerformanceSection({
             </Tooltip>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="flex items-center justify-between text-sm text-zinc-200">
-              <span className="font-medium text-zinc-200">Steady buffer (segments)</span>
-              <span className="font-semibold text-zinc-100">{steadyBuffer}</span>
+          <div className={`rounded-xl border px-4 py-3 ${chrome.insetCard}`}>
+            <div className={`flex items-center justify-between text-sm ${chrome.body}`}>
+              <span className="font-medium">Steady buffer (segments)</span>
+              <span className={`font-semibold ${chrome.title}`}>{steadyBuffer}</span>
             </div>
-            <div className="text-[11px] text-zinc-400 mt-1">
+            <div className={`text-[11px] mt-1 ${chrome.muted}`}>
               Keeps playback smooth once it is running.
             </div>
             <Tooltip label="Steady buffer size" className="w-full">
@@ -284,12 +285,12 @@ export function PerformanceSection({
             </Tooltip>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="flex items-center justify-between text-sm text-zinc-200">
-              <span className="font-medium text-zinc-200">Crossfade (ms)</span>
-              <span className="font-semibold text-zinc-100">{crossfadeMs}</span>
+          <div className={`rounded-xl border px-4 py-3 ${chrome.insetCard}`}>
+            <div className={`flex items-center justify-between text-sm ${chrome.body}`}>
+              <span className="font-medium">Crossfade (ms)</span>
+              <span className={`font-semibold ${chrome.title}`}>{crossfadeMs}</span>
             </div>
-            <div className="text-[11px] text-zinc-400 mt-1">
+            <div className={`text-[11px] mt-1 ${chrome.muted}`}>
               Blends adjacent segments to reduce gaps.
             </div>
             <Tooltip label="Crossfade duration" className="w-full">

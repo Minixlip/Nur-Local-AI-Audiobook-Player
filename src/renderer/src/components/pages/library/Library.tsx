@@ -3,12 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { FiPlus, FiSearch } from 'react-icons/fi'
 import { useBookImporter } from '../../../hooks/useBookImporter'
 import { useLibrary, SavedBook } from '../../../hooks/useLibrary'
+import { useReaderSettings } from '../../../hooks/useReaderSettings'
+import { getAppTheme } from '../../../theme/appTheme'
 import Tooltip from '../../ui/Tooltip'
 
 export default function Library(): React.JSX.Element {
   const navigate = useNavigate()
   const { library, addToLibrary, removeBook } = useLibrary()
   const { importBook } = useBookImporter()
+  const { settings } = useReaderSettings()
+  const theme = getAppTheme(settings.theme)
   const [search, setSearch] = useState('')
 
   const handleImportNew = async () => {
@@ -41,16 +45,16 @@ export default function Library(): React.JSX.Element {
   ).length
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-5 sm:px-6 lg:px-8">
+    <div className={`h-full overflow-y-auto px-5 py-5 sm:px-6 lg:px-8 ${theme.body}`}>
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.03))] p-6 shadow-[0_22px_70px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-8">
+        <section className={`rounded-[2rem] border p-6 backdrop-blur-xl sm:p-8 ${theme.heroCard}`}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
-              <div className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Library</div>
-              <h2 className="mt-3 text-4xl font-semibold tracking-tight text-zinc-50 md:text-5xl">
+              <div className={`text-[11px] uppercase tracking-[0.35em] ${theme.eyebrow}`}>Library</div>
+              <h2 className={`mt-3 text-4xl font-semibold tracking-tight md:text-5xl ${theme.title}`}>
                 Your shelf, ready to read.
               </h2>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-400">
+              <p className={`mt-4 max-w-2xl text-sm leading-6 ${theme.muted}`}>
                 Import EPUBs, resume a chapter in one click, and keep progress synced with voice
                 playback.
               </p>
@@ -60,45 +64,45 @@ export default function Library(): React.JSX.Element {
               <Tooltip label="Import a new book">
                 <button
                   onClick={handleImportNew}
-                  className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-[0_14px_30px_rgba(0,0,0,0.25)] transition hover:bg-zinc-200 active:scale-95"
+                  className={`inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold shadow-[0_14px_30px_rgba(0,0,0,0.25)] transition active:scale-95 ${theme.primaryButton}`}
                 >
                   <FiPlus className="text-base" />
                   Add Book
                 </button>
               </Tooltip>
-              <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-zinc-300">
+              <div className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] ${theme.pill}`}>
                 {totalBooks} total
               </div>
             </div>
           </div>
 
           <div className="mt-6 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-4">
-              <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">Books</div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-50">{totalBooks}</div>
+            <div className={`rounded-2xl border px-4 py-4 ${theme.softCard}`}>
+              <div className={`text-[11px] uppercase tracking-[0.28em] ${theme.eyebrow}`}>Books</div>
+              <div className={`mt-2 text-2xl font-semibold ${theme.title}`}>{totalBooks}</div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-4">
-              <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">In progress</div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-50">{resumedBooks}</div>
+            <div className={`rounded-2xl border px-4 py-4 ${theme.softCard}`}>
+              <div className={`text-[11px] uppercase tracking-[0.28em] ${theme.eyebrow}`}>In progress</div>
+              <div className={`mt-2 text-2xl font-semibold ${theme.title}`}>{resumedBooks}</div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-4">
-              <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">Finished</div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-50">{finishedBooks}</div>
+            <div className={`rounded-2xl border px-4 py-4 ${theme.softCard}`}>
+              <div className={`text-[11px] uppercase tracking-[0.28em] ${theme.eyebrow}`}>Finished</div>
+              <div className={`mt-2 text-2xl font-semibold ${theme.title}`}>{finishedBooks}</div>
             </div>
           </div>
 
           <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="relative flex-1">
-              <FiSearch className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <FiSearch className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 ${theme.inputIcon}`} />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search your library"
-                className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition focus:border-white/20 focus:bg-black/30"
+                className={`w-full rounded-2xl border py-3 pl-11 pr-4 text-sm outline-none transition ${theme.input}`}
               />
             </label>
 
-            <div className="text-xs uppercase tracking-[0.22em] text-zinc-500">
+            <div className={`text-xs uppercase tracking-[0.22em] ${theme.subtle}`}>
               {filteredLibrary.length} visible of {totalBooks}
             </div>
           </div>
@@ -121,8 +125,8 @@ export default function Library(): React.JSX.Element {
                 }}
                 aria-label={`Open ${book.title}`}
               >
-                <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.04] shadow-[0_18px_45px_rgba(0,0,0,0.24)] transition duration-300 group-hover:-translate-y-1 group-hover:border-white/20 group-hover:bg-white/[0.06]">
-                  <div className="relative aspect-[2/3] overflow-hidden bg-zinc-900/70">
+                <div className={`overflow-hidden rounded-[1.75rem] border transition duration-300 group-hover:-translate-y-1 ${theme.card}`}>
+                  <div className={`relative aspect-[2/3] overflow-hidden ${theme.softCard}`}>
                     {book.cover ? (
                       <img
                         src={book.cover}
@@ -130,9 +134,9 @@ export default function Library(): React.JSX.Element {
                         alt={book.title}
                       />
                     ) : (
-                      <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_40%),linear-gradient(180deg,rgba(24,24,27,0.9),rgba(15,15,18,1))] p-4 text-center">
-                        <div className="text-3xl font-semibold tracking-[0.2em] text-zinc-100">Nur</div>
-                        <div className="mt-2 text-xs uppercase tracking-[0.25em] text-zinc-500">
+                      <div className={`flex h-full w-full flex-col items-center justify-center p-4 text-center ${theme.coverFallback}`}>
+                        <div className={`text-3xl font-semibold tracking-[0.2em] ${theme.title}`}>Nur</div>
+                        <div className={`mt-2 text-xs uppercase tracking-[0.25em] ${theme.subtle}`}>
                           No cover
                         </div>
                       </div>
@@ -141,18 +145,18 @@ export default function Library(): React.JSX.Element {
                     <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.02),rgba(0,0,0,0.48))] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
                     {typeof book.lastPageIndex === 'number' && book.lastPageIndex > 0 && (
-                      <div className="absolute left-3 top-3 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white backdrop-blur-md">
+                      <div className={`absolute left-3 top-3 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] backdrop-blur-md ${theme.pill}`}>
                         Continue
                       </div>
                     )}
 
                     <div className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 opacity-0 transition duration-300 group-hover:opacity-100">
-                      <span className="rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-black">
+                      <span className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${theme.primaryButton}`}>
                         Open
                       </span>
                       <button
                         onClick={(event) => removeBook(book.id, event)}
-                        className="rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-md transition hover:bg-red-500/80"
+                        className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold backdrop-blur-md transition ${theme.secondaryButton}`}
                         aria-label={`Remove ${book.title}`}
                       >
                         Remove
@@ -162,14 +166,14 @@ export default function Library(): React.JSX.Element {
 
                   <div className="space-y-3 px-4 pb-4 pt-4">
                     <div className="min-h-12">
-                      <h3 className="text-sm font-semibold leading-snug text-zinc-100">
+                      <h3 className={`text-sm font-semibold leading-snug ${theme.title}`}>
                         {book.title}
                       </h3>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                    <div className={`flex items-center justify-between text-[11px] uppercase tracking-[0.22em] ${theme.subtle}`}>
                       <span>Added {new Date(book.dateAdded).toLocaleDateString()}</span>
                       {typeof book.lastPageIndex === 'number' && book.lastPageIndex > 0 ? (
-                        <span className="text-emerald-300/80">Resume</span>
+                        <span className={theme.accentText}>Resume</span>
                       ) : (
                         <span>New</span>
                       )}
@@ -179,9 +183,9 @@ export default function Library(): React.JSX.Element {
                       typeof book.totalPages === 'number' &&
                       book.totalPages > 0 && (
                         <div>
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                          <div className={`h-1.5 w-full overflow-hidden rounded-full ${theme.progressTrack}`}>
                             <div
-                              className="h-full rounded-full bg-white/75"
+                              className={`h-full rounded-full ${theme.progressFill}`}
                               style={{
                                 width: `${Math.min(
                                   100,
@@ -190,7 +194,7 @@ export default function Library(): React.JSX.Element {
                               }}
                             />
                           </div>
-                          <div className="mt-1 text-[11px] text-zinc-500">
+                          <div className={`mt-1 text-[11px] ${theme.subtle}`}>
                             Page {book.lastPageIndex + 1} of {book.totalPages}
                           </div>
                         </div>
@@ -201,22 +205,22 @@ export default function Library(): React.JSX.Element {
             ))}
           </section>
         ) : (
-          <section className="rounded-[2rem] border border-dashed border-white/10 bg-white/[0.03] p-8 text-center shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
+          <section className={`rounded-[2rem] border border-dashed p-8 text-center ${theme.card}`}>
             <div className="mx-auto max-w-xl">
-              <div className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">
+              <div className={`text-[11px] uppercase tracking-[0.35em] ${theme.eyebrow}`}>
                 Empty shelf
               </div>
-              <h3 className="mt-3 text-2xl font-semibold text-zinc-50">
+              <h3 className={`mt-3 text-2xl font-semibold ${theme.title}`}>
                 Import your first book to get started.
               </h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">
+              <p className={`mt-3 text-sm leading-6 ${theme.muted}`}>
                 Nur keeps reading state local, so your library stays fast and private.
               </p>
               <div className="mt-6 flex justify-center">
                 <Tooltip label="Import a new book">
                   <button
                     onClick={handleImportNew}
-                    className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200 active:scale-95"
+                    className={`inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition active:scale-95 ${theme.primaryButton}`}
                   >
                     <FiPlus className="text-base" />
                     Import EPUB
