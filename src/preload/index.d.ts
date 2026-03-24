@@ -1,6 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { TtsEngine, TtsStatusSnapshot } from '../shared/tts'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../shared/runtime'
+import type { TranslationResult, TranslationTargetLanguage } from '../shared/translation'
 
 declare global {
   interface Window {
@@ -11,13 +12,22 @@ declare global {
         text: string,
         speed?: number,
         sessionId?: string,
-        options?: { engine?: string; voicePath?: string | null; quality_mode?: string }
+        options?: {
+          engine?: string
+          voicePath?: string | null
+          quality_mode?: string
+          language?: string
+        }
       ) => Promise<any>
 
       setSession: (sessionId: string) => Promise<boolean>
       checkBackend: () => Promise<{ ok: boolean; ttsReady: boolean }>
       getTtsStatus: () => Promise<TtsStatusSnapshot>
       ensureModel: (engine: TtsEngine) => Promise<TtsStatusSnapshot>
+      translatePage: (
+        text: string,
+        targetLanguage: TranslationTargetLanguage
+      ) => Promise<TranslationResult>
       getRuntimeStatus: () => Promise<RuntimeStatusSnapshot>
       restartBackend: () => Promise<TtsStatusSnapshot>
       checkForUpdates: () => Promise<UpdateStatusSnapshot>

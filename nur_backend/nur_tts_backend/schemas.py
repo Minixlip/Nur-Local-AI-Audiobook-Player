@@ -18,3 +18,8 @@ class SpeakRequest(BaseModel):
 
 class PrepareModelRequest(BaseModel):
     engine: str
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_language: str

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { TtsEngine } from '../shared/tts'
+import type { TranslationTargetLanguage } from '../shared/translation'
 
 const api = {
   // UPDATED: Now accepts 'options' as the 4th argument (engine, voicePath, etc.)
@@ -11,6 +12,8 @@ const api = {
   checkBackend: () => ipcRenderer.invoke('tts:health'),
   getTtsStatus: () => ipcRenderer.invoke('tts:getStatus'),
   ensureModel: (engine: TtsEngine) => ipcRenderer.invoke('tts:ensureModel', engine),
+  translatePage: (text: string, targetLanguage: TranslationTargetLanguage) =>
+    ipcRenderer.invoke('translation:translatePage', { text, targetLanguage }),
   getRuntimeStatus: () => ipcRenderer.invoke('app:getRuntimeStatus'),
   restartBackend: () => ipcRenderer.invoke('app:restartBackend'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
@@ -41,8 +44,7 @@ const api = {
   revealPath: (filepath: string) => ipcRenderer.invoke('fs:revealPath', { filepath }),
   openPath: (filepath: string) => ipcRenderer.invoke('fs:openPath', { filepath }),
   listVoices: () => ipcRenderer.invoke('voice:list'),
-  addVoice: (filePath: string, name: string) =>
-    ipcRenderer.invoke('voice:add', { filePath, name }),
+  addVoice: (filePath: string, name: string) => ipcRenderer.invoke('voice:add', { filePath, name }),
   removeVoice: (id: string) => ipcRenderer.invoke('voice:remove', { id }),
   saveBook: (path: string, title: string, cover: string | null) =>
     ipcRenderer.invoke('save-book', path, title, cover),
