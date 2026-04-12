@@ -23,3 +23,8 @@ class PrepareModelRequest(BaseModel):
 class TranslateRequest(BaseModel):
     text: str
     target_language: str
+
+
+class SummarizeRequest(BaseModel):
+    text: str
+    title: str = ''

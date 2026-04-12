@@ -6,6 +6,7 @@ import { getMainLogPath } from './logger'
 import { readJsonFile, writeJsonAtomic } from './storage'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../shared/runtime'
 import { DEFAULT_TTS_ENGINE, type TtsEngine, type TtsStatusSnapshot } from '../shared/tts'
+import type { BookSummaryResult } from '../shared/summarization'
 import type { TranslationResult, TranslationTargetLanguage } from '../shared/translation'
 
 interface StoredVoice {
@@ -207,6 +208,71 @@ export function registerIpcHandlers({
           JSON.stringify({
             text,
             target_language: targetLanguage
+          })
+        )
+        request.end()
+      })
+    }
+  )
+
+  ipcMain.handle(
+    'summary:summarizeBook',
+    async (_event, { text, title }: { text: string; title: string }) => {
+      return new Promise<BookSummaryResult>((resolve, reject) => {
+        const request = net.request({
+          method: 'POST',
+          protocol: 'http:',
+          hostname: backendHost,
+          port: backendPort,
+          path: '/summarize'
+        })
+
+        request.setHeader('Content-Type', 'application/json')
+        request.on('response', (response) => {
+          const chunks: Buffer[] = []
+
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+          response.on('end', () => {
+            const raw = Buffer.concat(chunks).toString('utf-8')
+
+            if (response.statusCode !== 200) {
+              try {
+                const payload = JSON.parse(raw) as { detail?: string }
+                reject(payload.detail || `Summary failed: ${response.statusCode}`)
+              } catch {
+                reject(raw || `Summary failed: ${response.statusCode}`)
+              }
+              return
+            }
+
+            try {
+              const payload = JSON.parse(raw) as {
+                summary?: string
+                model?: string
+                generated_at?: string
+              }
+
+              if (!payload.summary || !payload.model || !payload.generated_at) {
+                reject('Summary returned an invalid payload.')
+                return
+              }
+
+              resolve({
+                summary: payload.summary,
+                model: payload.model,
+                generatedAt: payload.generated_at
+              })
+            } catch {
+              reject('Summary returned invalid JSON.')
+            }
+          })
+        })
+
+        request.on('error', (error) => reject(error.message))
+        request.write(
+          JSON.stringify({
+            text,
+            title
           })
         )
         request.end()

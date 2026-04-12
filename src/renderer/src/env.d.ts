@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { BookSummaryResult } from '../../shared/summarization'
 import type { TtsEngine, TtsStatusSnapshot } from '../../shared/tts'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../../shared/runtime'
 import type { TranslationResult, TranslationTargetLanguage } from '../../shared/translation'
@@ -29,6 +30,7 @@ interface ICustomAPI {
     text: string,
     targetLanguage: TranslationTargetLanguage
   ) => Promise<TranslationResult>
+  summarizeBook: (text: string, title: string) => Promise<BookSummaryResult>
   getRuntimeStatus: () => Promise<RuntimeStatusSnapshot>
   restartBackend: () => Promise<TtsStatusSnapshot>
   checkForUpdates: () => Promise<UpdateStatusSnapshot>
@@ -51,6 +53,12 @@ interface ICustomAPI {
   saveBook: (path: string, title: string, cover: string | null) => Promise<any>
   getLibrary: () => Promise<any[]>
   deleteBook: (id: string) => Promise<boolean>
+  updateBookSummary: (
+    bookId: string,
+    summary: string | null,
+    summaryUpdatedAt: string | null,
+    summaryModel: string | null
+  ) => Promise<boolean>
   updateBookProgress: (bookId: string, progress: any) => Promise<boolean>
 }
 
@@ -71,6 +79,9 @@ interface SavedBook {
   lastPageIndex?: number
   totalPages?: number
   lastAnchorSentenceIndex?: number
+  summary?: string | null
+  summaryUpdatedAt?: string | null
+  summaryModel?: string | null
 }
 
 declare global {

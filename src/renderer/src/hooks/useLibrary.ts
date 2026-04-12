@@ -10,6 +10,9 @@ export interface SavedBook {
   lastPageIndex?: number
   totalPages?: number
   lastAnchorSentenceIndex?: number
+  summary?: string | null
+  summaryUpdatedAt?: string | null
+  summaryModel?: string | null
 }
 
 export function useLibrary() {
@@ -73,6 +76,33 @@ export function useLibrary() {
     })
   }
 
+  const updateSummary = async (
+    bookId: string,
+    summary: string | null,
+    summaryUpdatedAt?: string | null,
+    summaryModel?: string | null
+  ) => {
+    setLibrary((prev) =>
+      prev.map((book) =>
+        book.id === bookId
+          ? {
+              ...book,
+              summary,
+              summaryUpdatedAt: summaryUpdatedAt ?? null,
+              summaryModel: summaryModel ?? null
+            }
+          : book
+      )
+    )
+
+    await window.api.updateBookSummary(
+      bookId,
+      summary,
+      summaryUpdatedAt ?? null,
+      summaryModel ?? null
+    )
+  }
+
   // Load on startup
   useEffect(() => {
     refreshLibrary()
@@ -86,5 +116,13 @@ export function useLibrary() {
     return () => window.removeEventListener('library:updated', handleUpdate)
   }, [])
 
-  return { library, loadingLibrary, refreshLibrary, addToLibrary, removeBook, updateProgress }
+  return {
+    library,
+    loadingLibrary,
+    refreshLibrary,
+    addToLibrary,
+    removeBook,
+    updateProgress,
+    updateSummary
+  }
 }

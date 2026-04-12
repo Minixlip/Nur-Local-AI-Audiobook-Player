@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { BookSummaryResult } from '../shared/summarization'
 import type { TtsEngine, TtsStatusSnapshot } from '../shared/tts'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../shared/runtime'
 import type { TranslationResult, TranslationTargetLanguage } from '../shared/translation'
@@ -28,6 +29,7 @@ declare global {
         text: string,
         targetLanguage: TranslationTargetLanguage
       ) => Promise<TranslationResult>
+      summarizeBook: (text: string, title: string) => Promise<BookSummaryResult>
       getRuntimeStatus: () => Promise<RuntimeStatusSnapshot>
       restartBackend: () => Promise<TtsStatusSnapshot>
       checkForUpdates: () => Promise<UpdateStatusSnapshot>
@@ -50,6 +52,12 @@ declare global {
       saveBook: (path: string, title: string, cover: string | null) => Promise<any>
       getLibrary: () => Promise<any[]>
       deleteBook: (id: string) => Promise<boolean>
+      updateBookSummary: (
+        bookId: string,
+        summary: string | null,
+        summaryUpdatedAt: string | null,
+        summaryModel: string | null
+      ) => Promise<boolean>
       updateBookProgress: (bookId: string, progress: any) => Promise<boolean>
     }
   }

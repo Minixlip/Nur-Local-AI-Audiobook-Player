@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { BookSummaryResult } from '../shared/summarization'
 import type { TtsEngine } from '../shared/tts'
 import type { TranslationTargetLanguage } from '../shared/translation'
 
@@ -14,6 +15,8 @@ const api = {
   ensureModel: (engine: TtsEngine) => ipcRenderer.invoke('tts:ensureModel', engine),
   translatePage: (text: string, targetLanguage: TranslationTargetLanguage) =>
     ipcRenderer.invoke('translation:translatePage', { text, targetLanguage }),
+  summarizeBook: (text: string, title: string): Promise<BookSummaryResult> =>
+    ipcRenderer.invoke('summary:summarizeBook', { text, title }),
   getRuntimeStatus: () => ipcRenderer.invoke('app:getRuntimeStatus'),
   restartBackend: () => ipcRenderer.invoke('app:restartBackend'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
@@ -50,6 +53,17 @@ const api = {
     ipcRenderer.invoke('save-book', path, title, cover),
   getLibrary: () => ipcRenderer.invoke('get-library'),
   deleteBook: (id: string) => ipcRenderer.invoke('delete-book', id),
+  updateBookSummary: (
+    bookId: string,
+    summary: string | null,
+    summaryUpdatedAt: string | null,
+    summaryModel: string | null
+  ) =>
+    ipcRenderer.invoke('update-book-summary', bookId, {
+      summary,
+      summaryUpdatedAt,
+      summaryModel
+    }),
   updateBookProgress: (bookId: string, progress: any) =>
     ipcRenderer.invoke('update-book-progress', bookId, progress),
   openAudioFileDialog: () => ipcRenderer.invoke('dialog:openAudioFile')
