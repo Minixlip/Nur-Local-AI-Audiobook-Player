@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
+import type { BookSummaryResult } from '../../shared/summarization'
 import type { TtsEngine, TtsStatusSnapshot } from '../../shared/tts'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../../shared/runtime'
+import type { TranslationResult, TranslationTargetLanguage } from '../../shared/translation'
 
 interface IScanResponse {
   status: string
@@ -8,17 +10,27 @@ interface IScanResponse {
 }
 
 interface ICustomAPI {
-      generate: (
-        text: string,
-        speed?: number,
-        sessionId?: string,
-        options?: { engine?: string; voicePath?: string | null; quality_mode?: string }
-      ) => Promise<any>
+  generate: (
+    text: string,
+    speed?: number,
+    sessionId?: string,
+    options?: {
+      engine?: string
+      voicePath?: string | null
+      quality_mode?: string
+      language?: string
+    }
+  ) => Promise<any>
 
   setSession: (sessionId: string) => Promise<boolean>
   checkBackend: () => Promise<{ ok: boolean; ttsReady: boolean }>
   getTtsStatus: () => Promise<TtsStatusSnapshot>
   ensureModel: (engine: TtsEngine) => Promise<TtsStatusSnapshot>
+  translatePage: (
+    text: string,
+    targetLanguage: TranslationTargetLanguage
+  ) => Promise<TranslationResult>
+  summarizeBook: (text: string, title: string) => Promise<BookSummaryResult>
   getRuntimeStatus: () => Promise<RuntimeStatusSnapshot>
   restartBackend: () => Promise<TtsStatusSnapshot>
   checkForUpdates: () => Promise<UpdateStatusSnapshot>
@@ -41,6 +53,12 @@ interface ICustomAPI {
   saveBook: (path: string, title: string, cover: string | null) => Promise<any>
   getLibrary: () => Promise<any[]>
   deleteBook: (id: string) => Promise<boolean>
+  updateBookSummary: (
+    bookId: string,
+    summary: string | null,
+    summaryUpdatedAt: string | null,
+    summaryModel: string | null
+  ) => Promise<boolean>
   updateBookProgress: (bookId: string, progress: any) => Promise<boolean>
 }
 
@@ -61,6 +79,9 @@ interface SavedBook {
   lastPageIndex?: number
   totalPages?: number
   lastAnchorSentenceIndex?: number
+  summary?: string | null
+  summaryUpdatedAt?: string | null
+  summaryModel?: string | null
 }
 
 declare global {

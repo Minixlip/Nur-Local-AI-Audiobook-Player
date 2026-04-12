@@ -49,6 +49,8 @@ def bootstrap_runtime_environment() -> None:
 
     warnings.filterwarnings('ignore', category=FutureWarning)
     os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+    os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '30')
+    os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '60')
 
     import perth
     from chatterbox.models.t3 import t3 as chatterbox_t3_module

@@ -10,6 +10,7 @@ import { registerIpcHandlers } from './registerIpcHandlers'
 import { createBackendRuntime } from './backendRuntime'
 import {
   ensurePiperDownloaded,
+  ensureTranslationPiperDownloaded,
   getPiperOnnxPath,
   getPiperStatus,
   hasPiperModel
@@ -209,6 +210,7 @@ app.whenReady().then(() => {
     hasPiperModel,
     getPiperOnnxPath,
     ensurePiperDownloaded,
+    ensureTranslationPiperDownloaded,
     getTtsStatus,
     getRuntimeStatus,
     restartBackend,

@@ -6,6 +6,8 @@ import { getMainLogPath } from './logger'
 import { readJsonFile, writeJsonAtomic } from './storage'
 import type { RuntimeStatusSnapshot, UpdateStatusSnapshot } from '../shared/runtime'
 import { DEFAULT_TTS_ENGINE, type TtsEngine, type TtsStatusSnapshot } from '../shared/tts'
+import type { BookSummaryResult } from '../shared/summarization'
+import type { TranslationResult, TranslationTargetLanguage } from '../shared/translation'
 
 interface StoredVoice {
   id: string
@@ -22,6 +24,9 @@ interface RegisterIpcHandlersOptions {
   hasPiperModel: () => boolean
   getPiperOnnxPath: () => string
   ensurePiperDownloaded: () => Promise<boolean>
+  ensureTranslationPiperDownloaded: (
+    targetLanguage: TranslationTargetLanguage
+  ) => Promise<string | null>
   getTtsStatus: () => Promise<TtsStatusSnapshot>
   getRuntimeStatus: () => RuntimeStatusSnapshot
   restartBackend: () => Promise<TtsStatusSnapshot>
@@ -44,6 +49,7 @@ export function registerIpcHandlers({
   hasPiperModel,
   getPiperOnnxPath,
   ensurePiperDownloaded,
+  ensureTranslationPiperDownloaded,
   getTtsStatus,
   getRuntimeStatus,
   restartBackend,
@@ -137,12 +143,168 @@ export function registerIpcHandlers({
   })
 
   ipcMain.handle(
+    'translation:translatePage',
+    async (
+      _event,
+      { text, targetLanguage }: { text: string; targetLanguage: TranslationTargetLanguage }
+    ) => {
+      return new Promise<TranslationResult>((resolve, reject) => {
+        const request = net.request({
+          method: 'POST',
+          protocol: 'http:',
+          hostname: backendHost,
+          port: backendPort,
+          path: '/translate'
+        })
+
+        request.setHeader('Content-Type', 'application/json')
+        request.on('response', (response) => {
+          const chunks: Buffer[] = []
+
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+          response.on('end', () => {
+            const raw = Buffer.concat(chunks).toString('utf-8')
+
+            if (response.statusCode !== 200) {
+              if (response.statusCode === 404) {
+                reject(
+                  'Translation is unavailable in the running backend. Restart NUR so it can load the rebuilt backend.'
+                )
+                return
+              }
+
+              try {
+                const payload = JSON.parse(raw) as { detail?: string }
+                reject(payload.detail || `Translation failed: ${response.statusCode}`)
+              } catch {
+                reject(raw || `Translation failed: ${response.statusCode}`)
+              }
+              return
+            }
+
+            try {
+              const payload = JSON.parse(raw) as {
+                translated_text?: string
+                target_language?: TranslationTargetLanguage
+              }
+
+              if (!payload.translated_text || !payload.target_language) {
+                reject('Translation returned an invalid payload.')
+                return
+              }
+
+              resolve({
+                translatedText: payload.translated_text,
+                targetLanguage: payload.target_language
+              })
+            } catch {
+              reject('Translation returned invalid JSON.')
+            }
+          })
+        })
+
+        request.on('error', (error) => reject(error.message))
+        request.write(
+          JSON.stringify({
+            text,
+            target_language: targetLanguage
+          })
+        )
+        request.end()
+      })
+    }
+  )
+
+  ipcMain.handle(
+    'summary:summarizeBook',
+    async (_event, { text, title }: { text: string; title: string }) => {
+      return new Promise<BookSummaryResult>((resolve, reject) => {
+        const request = net.request({
+          method: 'POST',
+          protocol: 'http:',
+          hostname: backendHost,
+          port: backendPort,
+          path: '/summarize'
+        })
+
+        request.setHeader('Content-Type', 'application/json')
+        request.on('response', (response) => {
+          const chunks: Buffer[] = []
+
+          response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+          response.on('end', () => {
+            const raw = Buffer.concat(chunks).toString('utf-8')
+
+            if (response.statusCode !== 200) {
+              try {
+                const payload = JSON.parse(raw) as { detail?: string }
+                reject(payload.detail || `Summary failed: ${response.statusCode}`)
+              } catch {
+                reject(raw || `Summary failed: ${response.statusCode}`)
+              }
+              return
+            }
+
+            try {
+              const payload = JSON.parse(raw) as {
+                summary?: string
+                model?: string
+                generated_at?: string
+              }
+
+              if (!payload.summary || !payload.model || !payload.generated_at) {
+                reject('Summary returned an invalid payload.')
+                return
+              }
+
+              resolve({
+                summary: payload.summary,
+                model: payload.model,
+                generatedAt: payload.generated_at
+              })
+            } catch {
+              reject('Summary returned invalid JSON.')
+            }
+          })
+        })
+
+        request.on('error', (error) => reject(error.message))
+        request.write(
+          JSON.stringify({
+            text,
+            title
+          })
+        )
+        request.end()
+      })
+    }
+  )
+
+  ipcMain.handle(
     'tts:generate',
-    async (_event, { text, speed, sessionId, engine, voicePath, quality_mode }) => {
+    async (_event, { text, speed, sessionId, engine, voicePath, quality_mode, language }) => {
       const safeSpeed = speed || 1.0
-      const safeEngine: TtsEngine = engine === 'chatterbox' ? 'chatterbox' : DEFAULT_TTS_ENGINE
+      let safeEngine: TtsEngine = engine === 'chatterbox' ? 'chatterbox' : DEFAULT_TTS_ENGINE
+      const safeLanguage = typeof language === 'string' && language.trim() ? language.trim() : 'en'
+      const isTranslatedPreviewLanguage =
+        safeLanguage === 'es' || safeLanguage === 'fr' || safeLanguage === 'ar'
 
       let safeVoice = voicePath
+      if (isTranslatedPreviewLanguage) {
+        const translationVoicePath = await ensureTranslationPiperDownloaded(
+          safeLanguage as TranslationTargetLanguage
+        )
+
+        if (!translationVoicePath) {
+          throw new Error(
+            `Could not prepare the ${safeLanguage.toUpperCase()} translation voice. Check your connection and try again.`
+          )
+        }
+
+        safeEngine = 'piper'
+        safeVoice = translationVoicePath
+      }
+
       if (!safeVoice && safeEngine === 'piper') {
         safeVoice = hasPiperModel() ? getPiperOnnxPath() : ''
       }
@@ -196,7 +358,7 @@ export function registerIpcHandlers({
             engine: safeEngine,
             speaker_wav: safeEngine === 'chatterbox' ? safeVoice : '',
             piper_model_path: safeEngine === 'piper' ? safeVoice : '',
-            language: 'en',
+            language: safeLanguage,
             speed: safeSpeed,
             quality_mode: quality_mode === 'balanced' ? 'balanced' : 'studio'
           })
@@ -291,7 +453,11 @@ export function registerIpcHandlers({
       const voices = readVoicesDb()
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const extension = path.extname(filePath) || '.wav'
-      const safeName = String(name).trim().replace(/[^\w\- ]+/g, '').slice(0, 60) || 'Voice'
+      const safeName =
+        String(name)
+          .trim()
+          .replace(/[^\w\- ]+/g, '')
+          .slice(0, 60) || 'Voice'
       const filename = `${id}-${safeName.replace(/\s+/g, '_')}${extension}`
       const destination = path.join(voicesDir, filename)
 

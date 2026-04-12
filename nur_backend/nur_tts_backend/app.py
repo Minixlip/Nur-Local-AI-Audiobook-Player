@@ -27,7 +27,15 @@ from .piper_engine import (
     ensure_piper_voice,
     iter_piper_audio_bytes,
 )
-from .schemas import PrepareModelRequest, SessionControl, SpeakRequest
+from .schemas import (
+    PrepareModelRequest,
+    SessionControl,
+    SpeakRequest,
+    SummarizeRequest,
+    TranslateRequest,
+)
+from .summarization_engine import summarize_book_text
+from .translation_engine import translate_text
 
 runtime = create_runtime_context()
 
@@ -77,6 +85,22 @@ def prepare_model(request: PrepareModelRequest):
     validate_prepare_engine(request.engine)
     chatterbox = start_chatterbox_prepare(runtime)
     return {'status': 'ok', 'chatterbox': chatterbox, 'xtts': chatterbox}
+
+
+@app.post('/translate')
+def translate_page(request: TranslateRequest):
+    translated_text = translate_text(request.text, request.target_language)
+    return {
+        'status': 'ok',
+        'translated_text': translated_text,
+        'target_language': request.target_language,
+    }
+
+
+@app.post('/summarize')
+def summarize_book(request: SummarizeRequest):
+    summary_payload = summarize_book_text(request.text, request.title, runtime.device)
+    return {'status': 'ok', **summary_payload}
 
 
 @app.post('/tts/stream')

@@ -44,7 +44,10 @@ export function setupLibraryHandlers() {
         title: title || 'Unknown Book',
         path: destinationPath,
         cover: cover || null, // <--- SAVE THE COVER HERE
-        dateAdded: new Date().toISOString()
+        dateAdded: new Date().toISOString(),
+        summary: null,
+        summaryUpdatedAt: null,
+        summaryModel: null
       }
 
       books.push(newBook)
@@ -98,6 +101,23 @@ export function setupLibraryHandlers() {
       return false
     } catch (err) {
       console.error('Update Error:', err)
+      return false
+    }
+  })
+
+  ipcMain.handle('update-book-summary', async (_, bookId, summaryPayload) => {
+    try {
+      const books = readDb()
+      const bookIndex = books.findIndex((b: any) => b.id === bookId)
+
+      if (bookIndex !== -1) {
+        books[bookIndex] = { ...books[bookIndex], ...summaryPayload }
+        writeDb(books)
+        return true
+      }
+      return false
+    } catch (err) {
+      console.error('Summary Update Error:', err)
       return false
     }
   })
